@@ -45,3 +45,7 @@ Run lint, type-check and tests before declaring any task done.
   Keep non-route code outside `src/app/`.
 - `ios/` and `android/` are generated (CNG). Configure native behaviour in `app.json`.
 - Plans follow the superpowers format in `docs/superpowers/plans/`.
+- Lesson rendering: `src/components/lessons/LessonRenderer.tsx` holds the closed block registry
+  (mirrors `cms/src/blocks/lessonBlocks.ts` and the web's `components/learn/blocks`). Add a
+  block type in all three together. Markdown is native; only chunks with math use the DOM
+  component `MathMarkdown.tsx` (`'use dom'`). Keep DOM components to that one job.

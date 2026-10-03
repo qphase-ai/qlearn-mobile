@@ -35,6 +35,7 @@ Mobile (Expo, this repo) ──┘    Router→Service→Model  ├── Supaba
 | `GET /api/v1/courses` | Bearer | — | `CourseSummary[]` | Legacy content source (published only) |
 | `GET /api/v1/courses/{id}` | Bearer | — | `CourseDetail` (modules → lessons, `order_index`) | |
 | `GET /api/v1/lessons/{id}` | Bearer | — | `LessonDetail {id, module_id, title, content(md), lesson_type, is_pro, concepts[]}` | |
+| `GET /api/v1/search/lessons?q=&limit=` | Bearer | — | `LessonSearchResult[] {lesson_id, lesson_title, lesson_type, is_pro, module_id, module_title, course_id, course_title, snippet}` | **Added upstream after this audit** (Q-Learn `129ebf5`). Legacy content only. The web falls back to title matching for CMS |
 | `GET /api/v1/progress` | Bearer | — | `ProgressItem[] {lesson_id, status, completion_pct}` | All rows for the user, no pagination |
 | `PUT /api/v1/lessons/{id}/progress` | Bearer | `{status, completion_pct}` | `ProgressItem` | 404 unless `id` is a `content_refs` lesson |
 | `POST /api/v1/circuits/{circuit_id}/execute` | Bearer | `{circuit: CircuitSpec, shots=1024, name}` | `202 {execution_id, status:"pending"}` | Client mints `circuit_id`; validates before persisting; result via Realtime |
@@ -75,7 +76,9 @@ Curriculum when `NEXT_PUBLIC_CONTENT_SOURCE=cms` is served by the **web app's** 
 
 ## 6. Existing learning/progress APIs
 
-Only `GET /progress` and `PUT /lessons/{id}/progress`. Everything else on the web dashboard is **derived on the client** (`frontend/src/lib/curriculum.ts`): module completion, sequential "locks", "Level N" labels, and the next lesson (`useCourseBootstrap`). `xp`, `streak` and `masteryScores` live in a localStorage Zustand store and are never sent to the server. `skill_mastery` (BKT) exists as a table with **no API**.
+Only `GET /progress` and `PUT /lessons/{id}/progress`. Everything else on the web dashboard is **derived on the client** (`frontend/src/lib/curriculum.ts`): module completion, sequential "locks", "Level N" labels, and the next lesson (`useCourseBootstrap`). `xp`, `streak` and `masteryScores` live in a localStorage Zustand store and are never sent to the server.
+
+**Discrepancy (web):** the web never reads `GET /progress`. Its completion map is its own persisted localStorage copy, written on "Mark complete". Lessons completed on mobile (or another browser) are saved on the server but don't show as completed on the web until it hydrates from `GET /progress`. Mobile reads `GET /progress` as the source of truth. Suggested web fix: load `GET /progress` into `lessonProgress` on bootstrap. `skill_mastery` (BKT) exists as a table with **no API**.
 
 ## 7. Existing assessment APIs
 
@@ -201,9 +204,9 @@ Everything else (LLM keys, service key, DB URL, Vercel token, CMS secrets) stays
 
 ## 18. Implementation phases
 
-1. **Foundation:** Expo app, navigation shell, theme, Supabase Auth (email, Google, reset), session restore and refresh, auth guards, API client, `/auth/me` round trip, CI, EAS profiles. ← *this milestone*
-2. **Learn:** curriculum (legacy + CMS), level/module/lesson screens, block renderer, progress read/write, Home "continue learning".
-3. **Practice:** quiz UI on the backend quiz API (blocked on §13). Until then only non-scored CMS quiz blocks, without revealing answers.
+1. **Foundation:** Expo app, navigation shell, theme, Supabase Auth (email, Google, reset), session restore and refresh, auth guards, API client, `/auth/me` round trip, CI, EAS profiles. *(Done, `qlearn-mobile#1`)*
+2. **Learn:** curriculum (legacy + CMS), level and lesson screens, block renderer, progress read/write, lesson search, Home "continue learning", authored simulations run via `/execute` + Realtime. *(Plan: `docs/superpowers/plans/2026-10-03-phase-2-learn.md`)* The content contract has no separate "module" layer to show: the CMS's Level → Module → Lesson tree is flattened by the web's `/api/cms/*` mapping into course → level (as `ModuleWithLessons`) → lesson, so mobile has `level/[id]` and `lesson/[id]` routes but no `module/[id]`.
+3. **Practice:** quiz UI on the backend quiz API (blocked on §13). Until then, CMS inline quiz blocks render as an **ungraded self-check**, exactly as on the web. Their answers are already in the public CMS payload, and nothing is written to the learner model.
 4. **Tutor:** chat on `/tutor/chat` + Realtime streaming, persistent session per conversation, lesson and circuit context.
 5. **Build:** native SVG circuit editor → `CircuitSpec` → `/execute` → Realtime result. Port `gates.ts` and `circuit-spec.ts` with tests.
 6. **Polish:** offline cache (SQLite query persistence), notifications, deep links, performance, EAS release.

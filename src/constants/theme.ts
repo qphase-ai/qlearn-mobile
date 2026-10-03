@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+
 /**
  * Q-Learn design tokens, ported from the web design system
  * (frontend/src/app/globals.css: HSL tokens converted to hex). They are
@@ -100,6 +102,8 @@ export const Radii = {
 /** Minimum touch target (Apple HIG 44pt, Material 48dp). */
 export const MIN_TOUCH = 44;
 
+export const MonoFont = Platform.select({ ios: 'Menlo', default: 'monospace' });
+
 export const Typography = {
   display: { fontSize: 30, lineHeight: 36, fontWeight: '700' },
   title: { fontSize: 22, lineHeight: 28, fontWeight: '700' },
@@ -107,7 +111,7 @@ export const Typography = {
   body: { fontSize: 16, lineHeight: 24, fontWeight: '400' },
   label: { fontSize: 14, lineHeight: 20, fontWeight: '500' },
   caption: { fontSize: 12, lineHeight: 16, fontWeight: '400' },
-  mono: { fontSize: 14, lineHeight: 20, fontWeight: '400', fontFamily: 'monospace' },
+  mono: { fontSize: 14, lineHeight: 20, fontWeight: '400', fontFamily: MonoFont },
 } as const;
 
 export type TypographyVariant = keyof typeof Typography;

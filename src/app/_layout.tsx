@@ -91,6 +91,8 @@ function RootNavigator() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Protected guard={!!session}>
           <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="level/[id]" options={{ headerShown: true, title: '', headerBackTitle: 'Learn' }} />
+          <Stack.Screen name="lesson/[id]" options={{ headerShown: true, title: '', headerBackTitle: 'Back' }} />
         </Stack.Protected>
         <Stack.Protected guard={!session}>
           <Stack.Screen name="(auth)" />
