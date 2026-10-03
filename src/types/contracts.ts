@@ -98,6 +98,19 @@ export interface UpdateProgressRequest {
   completion_pct: number;
 }
 
+/** `GET /api/v1/search/lessons` (schemas/learning.py LessonSearchResult). */
+export interface LessonSearchResult {
+  lesson_id: string;
+  lesson_title: string;
+  lesson_type: LessonType | (string & {});
+  is_pro: boolean;
+  module_id: string;
+  module_title: string;
+  course_id: string;
+  course_title: string;
+  snippet: string | null;
+}
+
 // ── Lesson blocks (cms/src/blocks/lessonBlocks.ts, closed registry) ──────
 
 interface BlockBase {

@@ -1,0 +1,133 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { StyleSheet, View } from 'react-native';
+
+import { hasLessonContent, LessonRenderer } from '@/components/lessons/LessonRenderer';
+import { Banner, Button, EmptyState, ErrorState, LoadingState, Screen, Text } from '@/components/ui';
+import { Spacing } from '@/constants/theme';
+import {
+  isLessonCompleted,
+  isTrackableLessonId,
+  lessonNumber,
+  levelLabel,
+  locateLesson,
+} from '@/features/learning/curriculum';
+import { useActiveCourse, useCourse, useLesson, useMarkLessonComplete, useProgress } from '@/features/learning/hooks';
+import { useTheme } from '@/hooks/use-theme';
+import { toUserMessage } from '@/lib/api/errors';
+
+export default function LessonScreen() {
+  const theme = useTheme();
+  const { id, courseId } = useLocalSearchParams<{ id: string; courseId?: string }>();
+  const active = useActiveCourse();
+  const resolvedCourseId = courseId ?? active.activeId;
+  const lesson = useLesson(id);
+  const course = useCourse(resolvedCourseId);
+  const { progress } = useProgress();
+  const markComplete = useMarkLessonComplete();
+
+  if (lesson.isPending) return <LoadingState label="Loading lesson…" />;
+  if (lesson.isError) {
+    return (
+      <Screen edges={[]}>
+        <ErrorState error={lesson.error} onRetry={() => void lesson.refetch()} retrying={lesson.isRefetching} />
+      </Screen>
+    );
+  }
+
+  const location = course.data ? locateLesson(course.data, lesson.data.id) : null;
+  const completed = isLessonCompleted(progress, lesson.data.id);
+  const trackable = isTrackableLessonId(lesson.data.id);
+
+  const go = (lessonId: string) =>
+    router.replace({
+      pathname: '/lesson/[id]',
+      params: { id: lessonId, ...(resolvedCourseId ? { courseId: resolvedCourseId } : {}) },
+    });
+
+  return (
+    <Screen edges={['bottom']}>
+      <Stack.Screen options={{ title: location ? levelLabel(location.moduleIndex) : 'Lesson' }} />
+
+      <View style={styles.header}>
+        {location ? (
+          <Text variant="caption" color="primary" style={styles.eyebrow}>
+            {`LESSON ${lessonNumber(location.moduleIndex, location.lessonIndex)} · ${location.module.title.toUpperCase()}`}
+          </Text>
+        ) : null}
+        <Text variant="display" accessibilityRole="header">
+          {lesson.data.title}
+        </Text>
+        {lesson.data.concepts.length ? (
+          <Text variant="label" color="muted">
+            Concepts: {lesson.data.concepts.map((c) => c.name).join(', ')}
+          </Text>
+        ) : null}
+      </View>
+
+      {hasLessonContent(lesson.data) ? (
+        <LessonRenderer lesson={lesson.data} />
+      ) : (
+        <EmptyState icon="document-outline" title="This lesson has no content yet" />
+      )}
+
+      <View style={[styles.footer, { borderTopColor: theme.border }]}>
+        {!trackable ? (
+          <Text variant="caption" color="muted">
+            Progress tracking is unavailable for this lesson.
+          </Text>
+        ) : completed ? (
+          <View style={styles.completed} accessibilityLiveRegion="polite">
+            <Ionicons name="checkmark-circle" size={20} color={theme.success} />
+            <Text variant="label" color="success" style={styles.bold}>
+              Completed
+            </Text>
+          </View>
+        ) : (
+          <Button
+            label="Mark complete"
+            onPress={() => markComplete.mutate(lesson.data.id)}
+            loading={markComplete.isPending}
+          />
+        )}
+        {markComplete.isError ? (
+          <Banner tone="error" message={`Couldn't save your progress. ${toUserMessage(markComplete.error)}`} />
+        ) : null}
+
+        {location ? (
+          <View style={styles.nav}>
+            {location.previous ? (
+              <Button
+                label="Previous"
+                variant="ghost"
+                style={styles.navButton}
+                icon={<Ionicons name="chevron-back" size={16} color={theme.foreground} />}
+                onPress={() => go(location.previous!.id)}
+              />
+            ) : (
+              <View style={styles.navButton} />
+            )}
+            {location.next ? (
+              <Button
+                label="Next lesson"
+                variant="secondary"
+                style={styles.navButton}
+                onPress={() => go(location.next!.id)}
+              />
+            ) : null}
+          </View>
+        ) : null}
+      </View>
+    </Screen>
+  );
+}
+
+const styles = StyleSheet.create({
+  header: { gap: Spacing.sm },
+  eyebrow: { letterSpacing: 1, fontWeight: '700' },
+  footer: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: Spacing.lg, gap: Spacing.md, marginTop: Spacing.lg },
+  completed: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
+  bold: { fontWeight: '700' },
+  nav: { flexDirection: 'row', justifyContent: 'space-between', gap: Spacing.md },
+  navButton: { flex: 1 },
+});
