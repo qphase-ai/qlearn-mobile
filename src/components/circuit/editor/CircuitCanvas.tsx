@@ -252,14 +252,16 @@ export function CircuitCanvas() {
           showsHorizontalScrollIndicator={false}
           testID="canvas-scroll-horizontal">
           <GestureDetector gesture={gesture}>
-            <View style={{ width, height }} collapsable={false}>
-              <Svg
-                width={width}
-                height={height}
-                accessible
-                accessibilityRole="image"
-                accessibilityLabel={summary}
-                testID="circuit-canvas">
+            {/* Accessibility props live on the View: react-native-svg forwards them
+                to the DOM on web, where `accessible` is not a valid attribute. */}
+            <View
+              style={{ width, height }}
+              collapsable={false}
+              accessible
+              accessibilityRole="image"
+              accessibilityLabel={summary}
+              testID="circuit-canvas">
+              <Svg width={width} height={height}>
                 {backdrop}
                 {pendingCenter ? (
                   <Rect
