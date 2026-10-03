@@ -1,14 +1,7 @@
-import Storage from 'expo-sqlite/kv-store';
-
 import type { EditorGate } from '@/features/circuit/editor/types';
 import type { CircuitSpec } from '@/types/contracts';
 
-import {
-  DEFAULT_NAME,
-  HISTORY_LIMIT,
-  sanitizeDraft,
-  useCircuitEditorStore,
-} from '../circuit-editor-store';
+import { DEFAULT_NAME, HISTORY_LIMIT, sanitizeDraft, useCircuitEditorStore } from '../circuit-editor-store';
 
 // jest.mock calls are hoisted above the imports by babel-jest.
 jest.mock('expo-crypto', () => {
@@ -16,10 +9,19 @@ jest.mock('expo-crypto', () => {
   return { randomUUID: () => `gate-${++n}` };
 });
 
+// The in-memory kv mock from jest.setup.js; values are raw strings.
+const kv = jest.requireMock('expo-sqlite/kv-store').default as {
+  getItem: (key: string) => Promise<string | null>;
+  setItem: (key: string, value: string) => Promise<void>;
+  removeItem: (key: string) => Promise<void>;
+};
+const DRAFT_KEY = 'qlearn.circuit-draft';
+const saveDraft = (state: unknown) => kv.setItem(DRAFT_KEY, JSON.stringify({ state, version: 1 }));
+
 const initial = useCircuitEditorStore.getState();
 const store = () => useCircuitEditorStore.getState();
 
-beforeEach(() => {
+beforeEach(async () => {
   useCircuitEditorStore.setState(
     {
       ...initial,
@@ -35,15 +37,30 @@ beforeEach(() => {
     },
     true,
   );
+  // setState above autosaves; start every test with nothing stored.
+  await kv.removeItem(DRAFT_KEY);
 });
 
-const h = (id: string, qubit: number, column: number): EditorGate => ({ id, type: 'H', qubit, column });
+const h = (id: string, qubit: number, column: number): EditorGate => ({
+  id,
+  type: 'H',
+  qubit,
+  column,
+});
 
 describe('arming', () => {
   it('arms a gate, clearing selection and a pending control', () => {
-    useCircuitEditorStore.setState({ gates: [h('a', 0, 0)], selectedId: 'a', pendingControl: { qubit: 0, column: 1 } });
+    useCircuitEditorStore.setState({
+      gates: [h('a', 0, 0)],
+      selectedId: 'a',
+      pendingControl: { qubit: 0, column: 1 },
+    });
     store().arm('X');
-    expect(store()).toMatchObject({ armed: 'X', selectedId: null, pendingControl: null });
+    expect(store()).toMatchObject({
+      armed: 'X',
+      selectedId: null,
+      pendingControl: null,
+    });
   });
 
   it('disarms when the armed gate is tapped again or with null', () => {
@@ -104,10 +121,29 @@ describe('tapCell', () => {
     expect(store().armed).toBe('CX');
   });
 
-  it('ignores a first tap outside the wires', () => {
+  it('ignores a first tap outside the grid', () => {
     store().arm('CX');
     store().tapCell(5, 0);
+    store().tapCell(-1, 0);
+    store().tapCell(0, -1);
+    store().tapCell(0, 40);
+    store().tapCell(0, 1.5);
     expect(store().pendingControl).toBeNull();
+    store().tapCell(0, 39);
+    expect(store().pendingControl).toEqual({ qubit: 0, column: 39 });
+  });
+
+  it('shifts a two-qubit gate right when the pending column is taken', () => {
+    useCircuitEditorStore.setState({ gates: [h('a', 0, 0)] });
+    store().arm('CX');
+    store().tapCell(0, 0);
+    store().tapCell(1, 0);
+    expect(store().gates[1]).toMatchObject({
+      type: 'CX',
+      qubit: 1,
+      control: 0,
+      column: 1,
+    });
   });
 
   it('selects the gate under the tap when unarmed, including rows a control spans', () => {
@@ -154,7 +190,10 @@ describe('editing actions', () => {
   });
 
   it('removes the selected gate and clears the selection', () => {
-    useCircuitEditorStore.setState({ gates: [h('a', 0, 0), h('b', 1, 0)], selectedId: 'a' });
+    useCircuitEditorStore.setState({
+      gates: [h('a', 0, 0), h('b', 1, 0)],
+      selectedId: 'a',
+    });
     store().removeSelected();
     expect(store().gates.map((g) => g.id)).toEqual(['b']);
     expect(store().selectedId).toBeNull();
@@ -175,7 +214,11 @@ describe('editing actions', () => {
       pendingControl: { qubit: 0, column: 4 },
     });
     store().setQubitCount(2);
-    expect(store()).toMatchObject({ qubitCount: 2, selectedId: null, pendingControl: null });
+    expect(store()).toMatchObject({
+      qubitCount: 2,
+      selectedId: null,
+      pendingControl: null,
+    });
     expect(store().gates.map((g) => g.id)).toEqual(['a']);
   });
 
@@ -202,7 +245,9 @@ describe('editing actions', () => {
   });
 
   it('spec() is the canonical serialization of the current circuit', () => {
-    useCircuitEditorStore.setState({ gates: [{ id: 'm', type: 'M', qubit: 1, column: 0 }, h('a', 0, 0)] });
+    useCircuitEditorStore.setState({
+      gates: [{ id: 'm', type: 'M', qubit: 1, column: 0 }, h('a', 0, 0)],
+    });
     expect(store().spec()).toEqual({
       qubits: 2,
       classical_bits: 2,
@@ -231,6 +276,16 @@ describe('history', () => {
     expect(store().gates.map((g) => g.column)).toEqual([0, 1]);
     store().redo();
     expect(store().gates).toHaveLength(2);
+  });
+
+  it('undoing a load restores the previous name, and redo reapplies it', () => {
+    store().rename('Mine');
+    store().loadTemplate('ghz');
+    expect(store().name).toBe('GHZ state');
+    store().undo();
+    expect(store()).toMatchObject({ name: 'Mine', qubitCount: 2, gates: [] });
+    store().redo();
+    expect(store()).toMatchObject({ name: 'GHZ state', qubitCount: 3 });
   });
 
   it('restores the qubit count with the gates', () => {
@@ -263,7 +318,7 @@ describe('history', () => {
     expect(store().selectedId).toBeNull();
     store().redo();
     store().tapCell(0, 0);
-    useCircuitEditorStore.setState({ future: [{ qubitCount: 2, gates: [] }] });
+    useCircuitEditorStore.setState({ future: [{ qubitCount: 2, gates: [], name: DEFAULT_NAME }] });
     store().redo();
     expect(store().selectedId).toBeNull();
   });
@@ -300,7 +355,9 @@ describe('history', () => {
   });
 
   it('no-op and invalid ops do not push history', () => {
-    useCircuitEditorStore.setState({ gates: [h('a', 0, 0), { id: 'r', type: 'RX', qubit: 1, column: 0, params: { theta: 1 } }] });
+    useCircuitEditorStore.setState({
+      gates: [h('a', 0, 0), { id: 'r', type: 'RX', qubit: 1, column: 0, params: { theta: 1 } }],
+    });
     store().moveGate('a', 0, 0); // same cell
     store().moveGate('a', 1, 0); // onto another gate
     store().moveGate('missing', 0, 1);
@@ -328,7 +385,12 @@ describe('loading', () => {
   };
 
   it('replaces the circuit, resets interaction state and is undoable', () => {
-    useCircuitEditorStore.setState({ qubitCount: 1, gates: [h('a', 0, 0)], selectedId: 'a', armed: 'X' });
+    useCircuitEditorStore.setState({
+      qubitCount: 1,
+      gates: [h('a', 0, 0)],
+      selectedId: 'a',
+      armed: 'X',
+    });
     store().arm('CX');
     store().tapCell(0, 0);
     const result = store().loadSpec(bell, 'Lesson circuit');
@@ -350,7 +412,10 @@ describe('loading', () => {
 
   it('reports gates the editor cannot represent', () => {
     const result = store().loadSpec(
-      { ...bell, gates: [...bell.gates, { type: 'CCX', targets: [0] }, { type: 'X', targets: [9] }] },
+      {
+        ...bell,
+        gates: [...bell.gates, { type: 'CCX', targets: [0] }, { type: 'X', targets: [9] }],
+      },
       'x',
     );
     expect(result).toEqual({ ok: true, skipped: 2 });
@@ -362,7 +427,23 @@ describe('loading', () => {
     const result = store().loadSpec({ qubits: 9, classical_bits: 9, gates: [] }, 'big');
     expect(result.ok).toBe(false);
     expect(!result.ok && result.error).toMatch(/8 qubits/);
-    expect(store()).toMatchObject({ gates: [h('a', 0, 0)], name: DEFAULT_NAME, past: [] });
+    expect(store()).toMatchObject({
+      gates: [h('a', 0, 0)],
+      name: DEFAULT_NAME,
+      past: [],
+    });
+  });
+
+  it('reloading the circuit that is already open adds no undo step', () => {
+    store().loadSpec(bell, 'Bell');
+    const gates = store().gates;
+    store().arm('H');
+    expect(store().loadSpec(bell, 'Bell')).toEqual({ ok: true, skipped: 0 });
+    expect(store().past).toHaveLength(1);
+    expect(store().gates).toBe(gates);
+    expect(store().armed).toBeNull();
+    store().loadSpec(bell, 'Other name');
+    expect(store().past).toHaveLength(2);
   });
 
   it('rejects invalid specs', () => {
@@ -387,63 +468,137 @@ describe('persistence', () => {
       selectedId: 'a',
       armed: 'H',
       pendingControl: { qubit: 0, column: 0 },
-      past: [{ qubitCount: 2, gates: [] }],
-      future: [{ qubitCount: 2, gates: [] }],
+      past: [{ qubitCount: 2, gates: [], name: DEFAULT_NAME }],
+      future: [{ qubitCount: 2, gates: [], name: DEFAULT_NAME }],
     });
     const partialize = useCircuitEditorStore.persist.getOptions().partialize!;
-    expect(partialize(store())).toEqual({ qubitCount: 2, gates: [h('a', 0, 0)], name: DEFAULT_NAME, shots: 1024 });
+    expect(partialize(store())).toEqual({
+      qubitCount: 2,
+      gates: [h('a', 0, 0)],
+      name: DEFAULT_NAME,
+      shots: 1024,
+    });
   });
 
-  it('rehydrates a stored draft', async () => {
-    await Storage.setItem(
-      'qlearn.circuit-draft',
-      JSON.stringify({
-        state: { qubitCount: 3, gates: [h('a', 2, 1)], name: 'Mine', shots: 256 },
-        version: 0,
-      }),
-    );
+  it('rehydrates a stored draft and resets transient state', async () => {
+    useCircuitEditorStore.setState({
+      selectedId: 'x',
+      armed: 'H',
+      pendingControl: { qubit: 0, column: 0 },
+    });
+    await kv.removeItem(DRAFT_KEY); // the setState above autosaved over the seed
+    await saveDraft({
+      qubitCount: 3,
+      gates: [h('a', 2, 1)],
+      name: 'Mine',
+      shots: 256,
+    });
     await useCircuitEditorStore.persist.rehydrate();
-    expect(store()).toMatchObject({ qubitCount: 3, gates: [h('a', 2, 1)], name: 'Mine', shots: 256 });
+    expect(store()).toMatchObject({
+      qubitCount: 3,
+      gates: [h('a', 2, 1)],
+      name: 'Mine',
+      shots: 256,
+      selectedId: null,
+      armed: null,
+      pendingControl: null,
+      past: [],
+      future: [],
+    });
+  });
+
+  it('keeps an edit made before the stored draft finished loading', async () => {
+    await saveDraft({
+      qubitCount: 3,
+      gates: [h('a', 2, 1)],
+      name: 'Old draft',
+      shots: 256,
+    });
+    const hydration = useCircuitEditorStore.persist.rehydrate(); // kv read is in flight
+    store().loadTemplate('bell');
+    await hydration;
+    expect(store()).toMatchObject({
+      qubitCount: 2,
+      name: 'Bell state',
+      shots: 1024,
+    });
+    expect(store().gates).toHaveLength(4);
+    store().undo();
+    expect(store()).toMatchObject({
+      qubitCount: 2,
+      gates: [],
+      name: DEFAULT_NAME,
+    });
+  });
+
+  it('resets to an empty draft when the stored value is not JSON', async () => {
+    useCircuitEditorStore.setState({ qubitCount: 4, armed: 'H' }); // autosaves, so corrupt the value after
+    await kv.setItem(DRAFT_KEY, '{not json');
+    await expect(useCircuitEditorStore.persist.rehydrate()).resolves.toBeUndefined();
+    expect(store()).toMatchObject({
+      qubitCount: 2,
+      gates: [],
+      name: DEFAULT_NAME,
+      armed: null,
+    });
+    // The reset autosaved a valid draft over the corrupt value.
+    expect(JSON.parse((await kv.getItem(DRAFT_KEY)) ?? 'null')).toMatchObject({
+      state: { qubitCount: 2 },
+    });
+    store().arm('H');
+    store().tapCell(0, 0);
+    expect(store().gates).toHaveLength(1);
   });
 
   it('sanitizes a corrupt draft instead of crashing', async () => {
-    await Storage.setItem(
-      'qlearn.circuit-draft',
-      JSON.stringify({
-        state: {
-          qubitCount: 99,
-          gates: [
-            h('ok', 0, 0),
-            h('ok', 1, 0), // duplicate id
-            { id: 'clash', type: 'X', qubit: 0, column: 0 }, // overlaps "ok"
-            { id: 'bad-type', type: 'NOPE', qubit: 0, column: 1 },
-            { id: 'far', type: 'H', qubit: 20, column: 0 },
-            { id: 'cx-no-control', type: 'CX', qubit: 1, column: 2 },
-            { id: 'cx', type: 'CX', qubit: 1, control: 0, column: 3 },
-            { id: 'rx', type: 'RX', qubit: 2, column: 4, params: { theta: 'big' } },
-            null,
-            'junk',
-          ],
-          name: 42,
-          shots: 3,
-        },
-        version: 0,
-      }),
-    );
+    await saveDraft({
+      qubitCount: 99,
+      gates: [
+        h('ok', 0, 0),
+        h('ok', 1, 0), // duplicate id
+        { id: 'clash', type: 'X', qubit: 0, column: 0 }, // overlaps "ok"
+        { id: 'bad-type', type: 'NOPE', qubit: 0, column: 1 },
+        { id: 'far', type: 'H', qubit: 20, column: 0 },
+        { id: 'cx-no-control', type: 'CX', qubit: 1, column: 2 },
+        { id: 'cx', type: 'CX', qubit: 1, control: 0, column: 3 },
+        { id: 'rx', type: 'RX', qubit: 2, column: 4, params: { theta: 'big' } },
+        null,
+        'junk',
+      ],
+      name: 42,
+      shots: 3,
+    });
     await useCircuitEditorStore.persist.rehydrate();
-    expect(store()).toMatchObject({ qubitCount: 8, name: DEFAULT_NAME, shots: 1024 });
+    expect(store()).toMatchObject({
+      qubitCount: 8,
+      name: DEFAULT_NAME,
+      shots: 1024,
+    });
     expect(store().gates).toEqual([
       h('ok', 0, 0),
       { id: 'cx', type: 'CX', qubit: 1, control: 0, column: 3 },
-      { id: 'rx', type: 'RX', qubit: 2, column: 4, params: { theta: Math.PI / 2 } },
+      {
+        id: 'rx',
+        type: 'RX',
+        qubit: 2,
+        column: 4,
+        params: { theta: Math.PI / 2 },
+      },
     ]);
   });
 
   it('keeps finite saved params and defaults non-object drafts', () => {
     expect(
-      sanitizeDraft({ qubitCount: 1, gates: [{ id: 'p', type: 'P', qubit: 0, column: 0, params: { theta: 0.5 } }] })
-        .gates,
+      sanitizeDraft({
+        qubitCount: 1,
+        gates: [{ id: 'p', type: 'P', qubit: 0, column: 0, params: { theta: 0.5 } }],
+      }).gates,
     ).toEqual([{ id: 'p', type: 'P', qubit: 0, column: 0, params: { theta: 0.5 } }]);
-    expect(sanitizeDraft('garbage')).toEqual({ qubitCount: 2, gates: [], name: DEFAULT_NAME, shots: 1024 });
+    expect(sanitizeDraft('garbage')).toEqual({
+      qubitCount: 2,
+      gates: [],
+      name: DEFAULT_NAME,
+      shots: 1024,
+    });
   });
 });

@@ -7,7 +7,13 @@ import { isGateType, isTwoQubitGate } from '@/features/circuit/editor/gates';
 import * as model from '@/features/circuit/editor/model';
 import { fromCircuitSpec, toCircuitSpec } from '@/features/circuit/editor/serialize';
 import { TEMPLATES } from '@/features/circuit/editor/templates';
-import type { EditorCircuit, EditorGate, GateParams, GateType } from '@/features/circuit/editor/types';
+import {
+  MAX_COLUMNS,
+  type EditorCircuit,
+  type EditorGate,
+  type GateParams,
+  type GateType,
+} from '@/features/circuit/editor/types';
 import type { CircuitSpec } from '@/types/contracts';
 
 /**
@@ -34,6 +40,15 @@ const LOAD_ERRORS = {
   invalid: "This circuit can't be opened in the builder.",
 } as const;
 
+/**
+ * One undo step: the circuit plus its name, so undoing a load also restores
+ * the name it replaced. `rename` itself is not an undo step; an undo after a
+ * rename restores the name the snapshot was taken with.
+ */
+export interface EditorSnapshot extends EditorCircuit {
+  name: string;
+}
+
 interface CircuitEditorState {
   qubitCount: number;
   gates: EditorGate[];
@@ -44,9 +59,9 @@ interface CircuitEditorState {
   armed: GateType | null;
   /** First tap of a two-qubit placement: the control qubit and the column to place in. */
   pendingControl: { qubit: number; column: number } | null;
-  /** Circuit snapshots for undo/redo, oldest first. Not persisted. */
-  past: EditorCircuit[];
-  future: EditorCircuit[];
+  /** Snapshots for undo/redo, oldest first. Not persisted. */
+  past: EditorSnapshot[];
+  future: EditorSnapshot[];
 
   /** Arm a palette gate; arming the armed gate again (or null) disarms. */
   arm: (type: GateType | null) => void;
@@ -77,6 +92,28 @@ const circuitOf = (s: Pick<CircuitEditorState, 'qubitCount' | 'gates'>): EditorC
   qubitCount: s.qubitCount,
   gates: s.gates,
 });
+
+const snapshotOf = (s: Pick<CircuitEditorState, 'qubitCount' | 'gates' | 'name'>): EditorSnapshot => ({
+  qubitCount: s.qubitCount,
+  gates: s.gates,
+  name: s.name,
+});
+
+/** Interaction and history state that never outlives a session. */
+const TRANSIENT = {
+  selectedId: null,
+  armed: null,
+  pendingControl: null,
+  past: [],
+  future: [],
+} satisfies Partial<CircuitEditorState>;
+
+const DEFAULT_DRAFT = {
+  qubitCount: DEFAULT_QUBITS,
+  gates: [],
+  name: DEFAULT_NAME,
+  shots: DEFAULT_SHOTS,
+} satisfies Partial<CircuitEditorState>;
 
 /** Drop a selection that no longer points at a gate (after undo, remove, shrink…). */
 const keepSelection = (selectedId: string | null, gates: EditorGate[]) =>
@@ -134,7 +171,7 @@ export const useCircuitEditorStore = create<CircuitEditorState>()(
         set((s) => ({
           qubitCount: next.qubitCount,
           gates: next.gates,
-          past: [...s.past, current].slice(-HISTORY_LIMIT),
+          past: [...s.past, { ...current, name: s.name }].slice(-HISTORY_LIMIT),
           future: [],
           selectedId: keepSelection(s.selectedId, next.gates),
         }));
@@ -147,15 +184,8 @@ export const useCircuitEditorStore = create<CircuitEditorState>()(
       };
 
       return {
-        qubitCount: DEFAULT_QUBITS,
-        gates: [],
-        name: DEFAULT_NAME,
-        shots: DEFAULT_SHOTS,
-        selectedId: null,
-        armed: null,
-        pendingControl: null,
-        past: [],
-        future: [],
+        ...DEFAULT_DRAFT,
+        ...TRANSIENT,
 
         arm: (type) =>
           set((s) => ({
@@ -176,11 +206,20 @@ export const useCircuitEditorStore = create<CircuitEditorState>()(
             return;
           }
           if (!pendingControl) {
-            if (Number.isInteger(qubit) && qubit >= 0 && qubit < qubitCount) set({ pendingControl: { qubit, column } });
+            const inGrid =
+              Number.isInteger(qubit) &&
+              qubit >= 0 &&
+              qubit < qubitCount &&
+              Number.isInteger(column) &&
+              column >= 0 &&
+              column < MAX_COLUMNS;
+            if (inGrid) set({ pendingControl: { qubit, column } });
             return;
           }
-          // The second tap only picks the target qubit: the gate goes in the
-          // column of the first tap, wherever the second one landed.
+          // The second tap only picks the target qubit: the gate is placed from
+          // the first tap's column, wherever the second one landed. Like every
+          // placement (and the web), if that column is taken on any spanned row
+          // the gate shifts right to the next column free on all of them.
           set({ pendingControl: null });
           if (qubit === pendingControl.qubit) return;
           apply((c) =>
@@ -214,8 +253,9 @@ export const useCircuitEditorStore = create<CircuitEditorState>()(
           set({
             qubitCount: previous.qubitCount,
             gates: previous.gates,
+            name: previous.name,
             past: s.past.slice(0, -1),
-            future: [circuitOf(s), ...s.future],
+            future: [snapshotOf(s), ...s.future],
             selectedId: keepSelection(s.selectedId, previous.gates),
             pendingControl: null,
           });
@@ -227,7 +267,8 @@ export const useCircuitEditorStore = create<CircuitEditorState>()(
           set({
             qubitCount: next.qubitCount,
             gates: next.gates,
-            past: [...s.past, circuitOf(s)].slice(-HISTORY_LIMIT),
+            name: next.name,
+            past: [...s.past, snapshotOf(s)].slice(-HISTORY_LIMIT),
             future: rest,
             selectedId: keepSelection(s.selectedId, next.gates),
             pendingControl: null,
@@ -242,9 +283,18 @@ export const useCircuitEditorStore = create<CircuitEditorState>()(
         loadSpec: (spec, name) => {
           const result = fromCircuitSpec(spec, randomUUID);
           if (!result.ok) return { ok: false, error: LOAD_ERRORS[result.reason] };
-          // A loaded circuit is a fresh object, so it always counts as an edit.
-          commit(result.circuit, circuitOf(get()));
-          set({ name: cleanName(name), selectedId: null, armed: null, pendingControl: null });
+          const current = get();
+          const nextName = cleanName(name);
+          // Reloading what is already open (same spec, same name) is not an edit:
+          // keep the gates (and their ids) and add no undo step.
+          const unchanged =
+            nextName === current.name &&
+            JSON.stringify(toCircuitSpec(result.circuit)) === JSON.stringify(toCircuitSpec(circuitOf(current)));
+          if (!unchanged) {
+            commit(result.circuit, circuitOf(current));
+            set({ name: nextName });
+          }
+          set({ selectedId: null, armed: null, pendingControl: null });
           return { ok: true, skipped: result.skipped };
         },
         loadTemplate: (id) => {
@@ -258,12 +308,34 @@ export const useCircuitEditorStore = create<CircuitEditorState>()(
     },
     {
       name: 'qlearn.circuit-draft',
+      // Bump with a `migrate` when the draft's shape changes; zustand drops a
+      // stored draft whose version it cannot migrate.
+      version: 1,
       storage: createJSONStorage(() => Storage),
       // Only the draft survives a restart; history, selection and the
       // placement state machine are per-session.
       partialize: (s): Draft => ({ qubitCount: s.qubitCount, gates: s.gates, name: s.name, shots: s.shots }),
-      // Nothing stored yet (first launch) keeps the defaults untouched.
-      merge: (persisted, current) => (isRecord(persisted) ? { ...current, ...sanitizeDraft(persisted) } : current),
+      /**
+       * kv reads are async, so the user can edit (e.g. "Open in Build" on a cold
+       * start) before the saved draft arrives. Their edit wins: once there is an
+       * undo step, the stored draft is ignored rather than clobbering it.
+       * Nothing stored yet (first launch) keeps the defaults untouched.
+       */
+      merge: (persisted, current) =>
+        !isRecord(persisted) || current.past.length > 0
+          ? current
+          : { ...current, ...sanitizeDraft(persisted), ...TRANSIENT },
+      /**
+       * An unreadable draft (e.g. not JSON) rejects hydration, and zustand then
+       * never marks the store hydrated, so UI must not gate on `hasHydrated()`.
+       * Reset to an empty draft instead (unless the user already edited); the
+       * write that follows also replaces the corrupt value in kv.
+       */
+      onRehydrateStorage: () => (_state, error) => {
+        if (!error) return;
+        if (useCircuitEditorStore.getState().past.length > 0) return;
+        useCircuitEditorStore.setState({ ...DEFAULT_DRAFT, ...TRANSIENT });
+      },
     }
   )
 );

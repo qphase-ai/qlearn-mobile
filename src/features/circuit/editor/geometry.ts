@@ -1,4 +1,4 @@
-import { MAX_COLUMNS } from './types';
+import { MAX_COLUMNS, MAX_QUBITS, MIN_QUBITS } from './types';
 
 /**
  * Pixel layout of the editor canvas. The canvas is one SVG with one tap
@@ -52,17 +52,23 @@ export function cellFromPoint(x: number, y: number, qubitCount: number): Cell | 
 /**
  * Canvas size for a circuit using `usedColumns` columns: at least three empty
  * columns after the last gate, but never wider than `MAX_COLUMNS` columns so
- * rendering stays bounded. Padding is mirrored below the last wire.
+ * rendering stays bounded. Padding is mirrored below the last wire. Inputs
+ * are clamped (qubits to 1–8, non-finite values to the minimum) so a bad
+ * value can never produce a NaN or unbounded canvas.
  */
 export function canvasSize(
   qubitCount: number,
   usedColumns: number,
 ): { width: number; height: number; columns: number } {
   'worklet';
-  const columns = Math.min(MAX_COLUMNS, Math.max(0, usedColumns) + TRAILING_COLUMNS);
+  const used = Number.isFinite(usedColumns) ? Math.max(0, Math.floor(usedColumns)) : 0;
+  const qubits = Number.isFinite(qubitCount)
+    ? Math.min(MAX_QUBITS, Math.max(MIN_QUBITS, Math.floor(qubitCount)))
+    : MIN_QUBITS;
+  const columns = Math.min(MAX_COLUMNS, used + TRAILING_COLUMNS);
   return {
     width: GRID.LABEL_W + columns * GRID.COL_W,
-    height: GRID.PAD_TOP * 2 + qubitCount * GRID.ROW_H,
+    height: GRID.PAD_TOP * 2 + qubits * GRID.ROW_H,
     columns,
   };
 }

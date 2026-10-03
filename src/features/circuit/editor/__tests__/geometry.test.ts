@@ -1,5 +1,5 @@
 import { canvasSize, cellCenter, cellFromPoint, GRID } from '../geometry';
-import { MAX_COLUMNS } from '../types';
+import { MAX_COLUMNS, MAX_QUBITS } from '../types';
 
 describe('cellCenter', () => {
   it('is the middle of the cell, right of the label gutter', () => {
@@ -57,5 +57,13 @@ describe('canvasSize', () => {
   it('never exceeds the column bound', () => {
     expect(canvasSize(1, MAX_COLUMNS - 2).columns).toBe(MAX_COLUMNS);
     expect(canvasSize(1, MAX_COLUMNS).width).toBe(GRID.LABEL_W + MAX_COLUMNS * GRID.COL_W);
+  });
+
+  it('clamps bad inputs instead of producing NaN', () => {
+    const one = canvasSize(1, 0);
+    expect(canvasSize(Number.NaN, Number.NaN)).toEqual(one);
+    expect(canvasSize(0, -4)).toEqual(one);
+    expect(canvasSize(1, Number.POSITIVE_INFINITY)).toEqual(one);
+    expect(canvasSize(20, 0).height).toBe(canvasSize(MAX_QUBITS, 0).height);
   });
 });
