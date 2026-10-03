@@ -7,6 +7,7 @@ import { Spacing } from '@/constants/theme';
 import { CircuitRunError, useCircuitRun } from '@/features/circuit/useCircuitRun';
 import { toUserMessage } from '@/lib/api/errors';
 
+import { AskAboutCircuit } from './AskAboutCircuit';
 import type { BlockProps } from './types';
 
 /**
@@ -50,6 +51,7 @@ export function SimulationBlock({ circuit, shots, view, title, description }: Bl
           <ProbabilityBars result={state.result} />
         )
       ) : null}
+      <AskAboutCircuit spec={circuit} title={title} />
     </Card>
   );
 }

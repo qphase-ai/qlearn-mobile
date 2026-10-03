@@ -20,7 +20,9 @@ The backend, database, auth, curriculum, AI tutor and quantum execution all live
 - **Phase 1 (Foundation)**, done: Expo SDK 57 app, navigation shell, theme, Supabase Auth (email, Google, password reset), secure session persistence, typed API client, CI and EAS profiles.
 - **Phase 2 (Learn)**: curriculum browsing (course → level → lesson) from the legacy API or the CMS, a native lesson renderer for every CMS block type (math via KaTeX in an Expo DOM component), progress shared with the web, lesson search, "continue learning" on Home, and authored simulations run on the Q-Learn quantum backend.
 
-Build and AI Tutor are next. See the roadmap in the audit (§18).
+- **Phase 4 (AI Tutor)**: streamed answers from the existing Q-Learn tutor (Markdown, math, citations), persistent conversations, and "ask about this lesson / this circuit" entry points. Phase 3 (graded practice) waits on a server-side quiz API.
+
+The circuit builder (Build) is next. See the roadmap in the audit (§18).
 
 ## Tech stack
 

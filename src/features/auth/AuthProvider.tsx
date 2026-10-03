@@ -4,6 +4,7 @@ import { createContext, use, useEffect, useState, type PropsWithChildren } from 
 
 import { apiClient } from '@/lib/api/client';
 import { getSupabase } from '@/lib/supabase/client';
+import { useTutorStore } from '@/stores/tutor-store';
 
 import { signOut } from './auth-api';
 
@@ -49,7 +50,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
       if (!mounted) return;
       setState({ session, user: session?.user ?? null, isLoading: false });
       // Never show one account's cached data to another.
-      if (event === 'SIGNED_OUT') queryClient.clear();
+      if (event === 'SIGNED_OUT') {
+        queryClient.clear();
+        // The tutor conversation index is per-account: drop it with the session.
+        useTutorStore.setState({ activeSessionId: null, conversations: [], context: null });
+      }
     });
 
     // A request still unauthorized after a token refresh means the session
