@@ -15,6 +15,7 @@ import {
 import { useActiveCourse, useCourse, useLesson, useMarkLessonComplete, useProgress } from '@/features/learning/hooks';
 import { useTheme } from '@/hooks/use-theme';
 import { toUserMessage } from '@/lib/api/errors';
+import { useTutorStore } from '@/stores/tutor-store';
 
 export default function LessonScreen() {
   const theme = useTheme();
@@ -25,6 +26,7 @@ export default function LessonScreen() {
   const course = useCourse(resolvedCourseId);
   const { progress } = useProgress();
   const markComplete = useMarkLessonComplete();
+  const setTutorContext = useTutorStore((s) => s.setContext);
 
   if (lesson.isPending) return <LoadingState label="Loading lesson…" />;
   if (lesson.isError) {
@@ -72,6 +74,15 @@ export default function LessonScreen() {
       )}
 
       <View style={[styles.footer, { borderTopColor: theme.border }]}>
+        <Button
+          label="Ask the AI Tutor about this lesson"
+          variant="ghost"
+          icon={<Ionicons name="sparkles-outline" size={16} color={theme.primary} />}
+          onPress={() => {
+            setTutorContext({ kind: 'lesson', lessonId: lesson.data.id, title: lesson.data.title });
+            router.navigate('/tutor');
+          }}
+        />
         {!trackable ? (
           <Text variant="caption" color="muted">
             Progress tracking is unavailable for this lesson.

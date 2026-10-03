@@ -4,6 +4,7 @@ import { CircuitDiagram } from '@/components/circuit/CircuitDiagram';
 import { Text } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 
+import { AskAboutCircuit } from './AskAboutCircuit';
 import type { BlockProps } from './types';
 
 export function CircuitBlock({ spec, title, description }: BlockProps<'circuit'>) {
@@ -16,6 +17,7 @@ export function CircuitBlock({ spec, title, description }: BlockProps<'circuit'>
           {description}
         </Text>
       ) : null}
+      <AskAboutCircuit spec={spec} title={title} />
     </View>
   );
 }

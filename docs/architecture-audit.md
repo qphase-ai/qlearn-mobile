@@ -88,6 +88,8 @@ Only `GET /progress` and `PUT /lessons/{id}/progress`. Everything else on the we
 
 `POST /tutor/chat` (202) plus Realtime tokens, and `GET /tutor/sessions/{id}`. Retrieval (RAG), model routing (LiteLLM fallbacks) and history (the last 20 rows of the session) all run on the server. The web mints a **new `session_id` for every message**, which throws away conversation context. Mobile should keep one `session_id` per conversation, and the backend already supports that. There is no endpoint to **list** sessions, so mobile cannot show a conversation history list yet.
 
+**Discrepancy (backend):** `lesson_id` is accepted by `POST /tutor/chat` and passed to `run_and_stream`, but never used: retrieval and the prompt only see the question, the history and `circuit_context`. So "ask about this lesson" gets no lesson grounding from the server. Mobile still sends `lesson_id` (it's the contract), and its lesson starter prompts name the lesson in the visible question text. Smallest backend fix: in `run_and_stream`, load the lesson title and concept names into the existing `concept` prompt slot (`TUTOR_DEFAULT_CONCEPT`), with no API change.
+
 ## 9. Existing circuit APIs
 
 `POST /circuits/{id}/execute` only. It upserts the circuit, so the row is effectively saved, but no endpoint lists or gets circuits or executions. The canonical format is `CircuitSpec {qubits, classical_bits, gates[{type, targets[], control?, params?, classical?}]}`. Gate set: `H X Y Z S T I RX RY RZ U P SX U3 CX CZ SWAP RXX RYY RZZ M`. Server-side validation runs before compile and execute. The result arrives only via the `circuit:{id}` broadcast.
@@ -206,8 +208,8 @@ Everything else (LLM keys, service key, DB URL, Vercel token, CMS secrets) stays
 
 1. **Foundation:** Expo app, navigation shell, theme, Supabase Auth (email, Google, reset), session restore and refresh, auth guards, API client, `/auth/me` round trip, CI, EAS profiles. *(Done, `qlearn-mobile#1`)*
 2. **Learn:** curriculum (legacy + CMS), level and lesson screens, block renderer, progress read/write, lesson search, Home "continue learning", authored simulations run via `/execute` + Realtime. *(Plan: `docs/superpowers/plans/2026-10-03-phase-2-learn.md`)* The content contract has no separate "module" layer to show: the CMS's Level → Module → Lesson tree is flattened by the web's `/api/cms/*` mapping into course → level (as `ModuleWithLessons`) → lesson, so mobile has `level/[id]` and `lesson/[id]` routes but no `module/[id]`.
+4. **Tutor**, delivered before Phase 3, which is blocked on the quiz API: streamed chat on `/tutor/chat` + Realtime, **one session per conversation** (server history gives context), a device-local conversation index (no list endpoint yet), lesson and circuit context (`circuit_context` = Qiskit source), and recovery from missed `complete` events via `GET /tutor/sessions/{id}`. *(Plan: `docs/superpowers/plans/2026-10-03-phase-4-tutor.md`)*
 3. **Practice:** quiz UI on the backend quiz API (blocked on §13). Until then, CMS inline quiz blocks render as an **ungraded self-check**, exactly as on the web. Their answers are already in the public CMS payload, and nothing is written to the learner model.
-4. **Tutor:** chat on `/tutor/chat` + Realtime streaming, persistent session per conversation, lesson and circuit context.
 5. **Build:** native SVG circuit editor → `CircuitSpec` → `/execute` → Realtime result. Port `gates.ts` and `circuit-spec.ts` with tests.
 6. **Polish:** offline cache (SQLite query persistence), notifications, deep links, performance, EAS release.
 
