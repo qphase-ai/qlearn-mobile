@@ -47,6 +47,8 @@ export function nextFreeColumn(cells: ReadonlySet<string>, rows: number[], from 
 }
 
 function insert(circuit: EditorCircuit, gate: EditorGate): EditorCircuit | null {
+  // Ids address gates in every other op, so a duplicate would make them ambiguous.
+  if (circuit.gates.some((g) => g.id === gate.id)) return null;
   if (!isIndex(gate.column, MAX_COLUMNS)) return null;
   const rows = gateRows(gate);
   if (!rows.every((q) => isIndex(q, circuit.qubitCount))) return null;

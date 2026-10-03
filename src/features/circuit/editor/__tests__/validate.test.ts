@@ -64,6 +64,30 @@ describe('validateCircuit', () => {
     ]);
   });
 
+  it('reports a gate without a targets list instead of throwing', () => {
+    const bad = { type: 'H' } as unknown as GateSpec;
+    expect(validateCircuit(spec([bad]))).toEqual(['H: targets must be a list of qubits']);
+  });
+
+  it('reports a missing gates list instead of throwing', () => {
+    expect(validateCircuit({ qubits: 1, classical_bits: 1 } as unknown as CircuitSpec)).toEqual([
+      'Circuit gates must be a list',
+    ]);
+  });
+
+  it('requires whole-number qubit counts and indices', () => {
+    expect(validateCircuit(spec([], 1.5))).toEqual(['Circuit qubit count must be a whole number']);
+    expect(validateCircuit(spec([{ type: 'H', targets: [0.5] }]))).toEqual(['H: target 0.5 must be a whole number']);
+    expect(validateCircuit(spec([{ type: 'CX', control: 0.5, targets: [1] }]))).toEqual([
+      'CX: control qubit 0.5 must be a whole number',
+    ]);
+  });
+
+  it('allows one target per single-qubit gate, but several for M', () => {
+    expect(validateCircuit(spec([{ type: 'H', targets: [0, 1] }]))).toEqual(['H: expects exactly one target qubit']);
+    expect(validateCircuit(spec([{ type: 'M', targets: [0, 1], classical: [0, 1] }]))).toEqual([]);
+  });
+
   it('ignores params on fixed gates', () => {
     expect(validateCircuit(spec([{ type: 'H', targets: [0], params: { theta: 'bad' } }]))).toEqual([]);
   });

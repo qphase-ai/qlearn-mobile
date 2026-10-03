@@ -89,6 +89,12 @@ describe('placeGate', () => {
     expect(placed.gates[1].column).toBe(1);
   });
 
+  it('rejects a duplicate id', () => {
+    const c = ok(placeGate(empty(), 'H', 0, 0, 'g1'));
+    expect(placeGate(c, 'X', 1, 0, 'g1')).toBeNull();
+    expect(placeTwoQubitGate(c, 'CX', 1, 2, 0, 'g1')).toBeNull();
+  });
+
   it('rejects two-qubit types', () => {
     expect(placeGate(empty(), 'CX', 0, 0, 'g')).toBeNull();
   });

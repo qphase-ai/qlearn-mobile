@@ -30,7 +30,7 @@ function Probe() {
   return <Text>{isLoading ? 'loading' : session ? 'signed-in' : 'signed-out'}</Text>;
 }
 
-async function renderProvider(queryClient = new QueryClient()) {
+async function renderProvider(queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } })) {
   await render(
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
@@ -66,7 +66,7 @@ describe('AuthProvider', () => {
 
   it('clears cached server data on sign-out', async () => {
     mockAuth.getSession.mockResolvedValue({ data: { session } });
-    const queryClient = new QueryClient();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
     queryClient.setQueryData(['profile', 'me', 'u1'], { email: 'a@b.co' });
     await renderProvider(queryClient);
     await screen.findByText('signed-in');

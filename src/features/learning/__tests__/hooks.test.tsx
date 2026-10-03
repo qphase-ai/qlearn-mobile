@@ -13,7 +13,7 @@ jest.mock('@/lib/api/endpoints/learning', () => ({
 }));
 
 function setup(initial: ProgressItem[]) {
-  const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity }, mutations: { retry: false } } });
   queryClient.setQueryData(learningKeys.progress(), initial);
   const wrapper = ({ children }: PropsWithChildren) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
