@@ -24,6 +24,29 @@ describe('EditorToolbar', () => {
     expect(button('Add a qubit')).toBeDisabled();
   });
 
+  it('confirms before removing a qubit that has gates', async () => {
+    const alert = jest.spyOn(Alert, 'alert');
+    useCircuitEditorStore.setState({
+      gates: [
+        { id: 'h', type: 'H', qubit: 0, column: 0 },
+        { id: 'c', type: 'CX', qubit: 1, control: 0, column: 1 },
+      ],
+    });
+    await render(<EditorToolbar onShowTemplates={jest.fn()} />);
+    await fireEvent.press(button('Remove a qubit'));
+    expect(editor().qubitCount).toBe(2);
+    expect(alert).toHaveBeenCalledWith('Remove qubit q1?', 'This deletes 1 gate. You can undo it.', expect.any(Array));
+    const remove = alert.mock.calls[0][2]!.find((b) => b.style === 'destructive')!;
+    await act(() => remove.onPress!());
+    expect(editor().qubitCount).toBe(1);
+    expect(editor().gates.map((g) => g.id)).toEqual(['h']);
+  });
+
+  it('disables Examples while they are already shown', async () => {
+    await render(<EditorToolbar onShowTemplates={jest.fn()} templatesDisabled />);
+    expect(button('Examples')).toBeDisabled();
+  });
+
   it('enables undo and redo only when there is history', async () => {
     await render(<EditorToolbar onShowTemplates={jest.fn()} />);
     expect(button('Undo')).toBeDisabled();

@@ -3,6 +3,7 @@ import { Alert, StyleSheet, TextInput, View } from 'react-native';
 
 import { Text } from '@/components/ui';
 import { MIN_TOUCH, Radii, Spacing, Typography } from '@/constants/theme';
+import { gateRows } from '@/features/circuit/editor/model';
 import { MAX_QUBITS, MIN_QUBITS } from '@/features/circuit/editor/types';
 import { useTheme } from '@/hooks/use-theme';
 import { useCircuitEditorStore } from '@/stores/circuit-editor-store';
@@ -43,7 +44,14 @@ function NameField() {
   );
 }
 
-export function EditorToolbar({ onShowTemplates }: { onShowTemplates: () => void }) {
+export function EditorToolbar({
+  onShowTemplates,
+  templatesDisabled = false,
+}: {
+  onShowTemplates: () => void;
+  /** True while the examples are already on screen (empty circuit). */
+  templatesDisabled?: boolean;
+}) {
   const qubitCount = useCircuitEditorStore((s) => s.qubitCount);
   const canUndo = useCircuitEditorStore((s) => s.past.length > 0);
   const canRedo = useCircuitEditorStore((s) => s.future.length > 0);
@@ -52,6 +60,21 @@ export function EditorToolbar({ onShowTemplates }: { onShowTemplates: () => void
   const undo = useCircuitEditorStore((s) => s.undo);
   const redo = useCircuitEditorStore((s) => s.redo);
   const clear = useCircuitEditorStore((s) => s.clear);
+
+  /** Dropping the last wire deletes the gates on it, so ask first. */
+  const removeQubit = () => {
+    const { gates, qubitCount: count } = useCircuitEditorStore.getState();
+    const last = count - 1;
+    const doomed = gates.filter((g) => gateRows(g).includes(last)).length;
+    if (doomed === 0) {
+      setQubitCount(count - 1);
+      return;
+    }
+    Alert.alert(`Remove qubit q${last}?`, `This deletes ${doomed} gate${doomed === 1 ? '' : 's'}. You can undo it.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: () => setQubitCount(count - 1) },
+    ]);
+  };
 
   const confirmClear = () =>
     Alert.alert('Clear the circuit?', 'This removes every gate. You can undo it.', [
@@ -68,7 +91,7 @@ export function EditorToolbar({ onShowTemplates }: { onShowTemplates: () => void
             icon="remove"
             label="Remove a qubit"
             disabled={qubitCount <= MIN_QUBITS}
-            onPress={() => setQubitCount(qubitCount - 1)}
+            onPress={removeQubit}
           />
           <Text variant="label" style={styles.count} testID="qubit-count">
             {`${qubitCount} qubit${qubitCount === 1 ? '' : 's'}`}
@@ -83,7 +106,7 @@ export function EditorToolbar({ onShowTemplates }: { onShowTemplates: () => void
         <View style={styles.actions}>
           <IconButton icon="arrow-undo" label="Undo" disabled={!canUndo} onPress={undo} />
           <IconButton icon="arrow-redo" label="Redo" disabled={!canRedo} onPress={redo} />
-          <IconButton icon="albums-outline" label="Examples" onPress={onShowTemplates} />
+          <IconButton icon="albums-outline" label="Examples" disabled={templatesDisabled} onPress={onShowTemplates} />
           <IconButton icon="trash-outline" label="Clear circuit" disabled={!hasGates} onPress={confirmClear} />
         </View>
       </View>

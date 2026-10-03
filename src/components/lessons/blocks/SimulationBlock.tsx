@@ -52,7 +52,7 @@ export function SimulationBlock({ circuit, shots, view, title, description }: Bl
           <ProbabilityBars result={state.result} />
         )
       ) : null}
-      <OpenInBuilder spec={circuit} title={title} />
+      <OpenInBuilder spec={circuit} title={title} shots={shots} />
       <AskAboutCircuit spec={circuit} title={title} />
     </Card>
   );

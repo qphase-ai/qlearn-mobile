@@ -19,11 +19,18 @@ import { useCircuitEditorStore } from '@/stores/circuit-editor-store';
 export default function BuildScreen() {
   const empty = useCircuitEditorStore((s) => s.gates.length === 0);
   const [showTemplates, setShowTemplates] = useState(false);
+  // An empty circuit always shows the examples; once it empties, close the
+  // toolbar-opened copy so it doesn't reappear when gates are added again.
+  const [wasEmpty, setWasEmpty] = useState(empty);
+  if (wasEmpty !== empty) {
+    setWasEmpty(empty);
+    if (empty) setShowTemplates(false);
+  }
 
   return (
     <Screen keyboard>
       <ScreenTitle title="Build" subtitle="Place gates, run your circuit, see what happens." />
-      <EditorToolbar onShowTemplates={() => setShowTemplates((v) => !v)} />
+      <EditorToolbar onShowTemplates={() => setShowTemplates((v) => !v)} templatesDisabled={empty} />
       <GatePalette />
       <CircuitCanvas />
       <GateInspector />

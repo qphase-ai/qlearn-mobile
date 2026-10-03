@@ -14,6 +14,9 @@ import { SHOT_OPTIONS, useCircuitEditorStore } from '@/stores/circuit-editor-sto
 
 type ResultView = 'probabilities' | 'statevector';
 
+/** Validation messages listed under Run before collapsing the rest into "+N more". */
+const MAX_ERRORS_SHOWN = 3;
+
 function Segmented<T extends string | number>({
   label,
   options,
@@ -66,15 +69,15 @@ export function RunPanel() {
   const [ranKey, setRanKey] = useState<string | null>(null);
 
   const spec = useMemo(() => toCircuitSpec({ qubitCount, gates }), [qubitCount, gates]);
-  const specKey = useMemo(() => JSON.stringify(spec), [spec]);
+  const runKey = useMemo(() => JSON.stringify({ spec, shots }), [spec, shots]);
   const errors = useMemo(() => validateCircuit(spec), [spec]);
   const running = state.status === 'running';
   const empty = gates.length === 0;
-  const blocker = empty ? 'Add a gate to run your circuit.' : (errors[0] ?? null);
+  const blocked = empty || errors.length > 0;
 
   const onRun = () => {
     const current = useCircuitEditorStore.getState().spec();
-    setRanKey(JSON.stringify(current));
+    setRanKey(JSON.stringify({ spec: current, shots }));
     void run(current, shots, name);
   };
 
@@ -85,13 +88,24 @@ export function RunPanel() {
       <Button
         label={state.status === 'done' ? 'Run again' : 'Run circuit'}
         loading={running}
-        disabled={blocker !== null}
+        disabled={blocked}
         onPress={onRun}
       />
-      {blocker ? (
-        <Text variant="caption" color={empty ? 'muted' : 'error'} testID="run-blocker">
-          {blocker}
+      {empty ? (
+        <Text variant="caption" color="muted" testID="run-blocker">
+          Add a gate to run your circuit.
         </Text>
+      ) : errors.length > 0 ? (
+        <View testID="run-blocker" accessibilityLiveRegion="polite">
+          {errors.slice(0, MAX_ERRORS_SHOWN).map((message, i) => (
+            <Text key={`${i}:${message}`} variant="caption" color="error">
+              {message}
+            </Text>
+          ))}
+          {errors.length > MAX_ERRORS_SHOWN ? (
+            <Text variant="caption" color="error">{`+${errors.length - MAX_ERRORS_SHOWN} more`}</Text>
+          ) : null}
+        </View>
       ) : (
         <Text variant="caption" color="muted">
           Runs on the Q-Learn simulator, {shots} times.
@@ -112,9 +126,9 @@ export function RunPanel() {
             onChange={setView}
             format={(v) => (v === 'probabilities' ? 'Probabilities' : 'State vector')}
           />
-          {ranKey !== specKey ? (
+          {ranKey !== runKey ? (
             <Text variant="caption" color="muted">
-              You changed the circuit since this run. Run it again to update.
+              You changed the circuit or shots since this run. Run it again to update.
             </Text>
           ) : null}
           {view === 'statevector' ? <StatevectorList result={state.result} /> : <ProbabilityBars result={state.result} />}

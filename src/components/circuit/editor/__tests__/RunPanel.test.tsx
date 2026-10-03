@@ -100,7 +100,7 @@ describe('RunPanel', () => {
         execution_time_ms: 5,
       },
     });
-    await act(() => useCircuitEditorStore.setState({ shots: 256 })); // re-render with the result
+    await screen.rerender(<RunPanel />); // pick up the mocked result
     expect(screen.getByLabelText('00: 50 percent')).toBeTruthy();
     expect(screen.queryByText(/You changed the circuit/)).toBeNull();
 
@@ -109,6 +109,37 @@ describe('RunPanel', () => {
 
     await act(() => useCircuitEditorStore.setState({ gates: editor().gates.slice(0, 1) }));
     expect(screen.getByText(/You changed the circuit/)).toBeTruthy();
+  });
+
+  it('flags a result once the shots change', async () => {
+    bell();
+    withState({ status: 'idle' });
+    await render(<RunPanel />);
+    await fireEvent.press(runButton());
+    withState({
+      status: 'done',
+      result: { status: 'completed', probabilities: { '00': 1 }, measurements: null, statevector: null, execution_time_ms: 1 },
+    });
+    await screen.rerender(<RunPanel />); // pick up the mocked result
+    expect(screen.queryByText(/You changed the circuit or shots/)).toBeNull();
+    await fireEvent.press(screen.getByRole('radio', { name: '256 shots' }));
+    expect(screen.getByText(/You changed the circuit or shots/)).toBeTruthy();
+  });
+
+  it('lists up to three problems, then how many more', async () => {
+    const bad = (id: string, column: number) => ({
+      id,
+      type: 'RX' as const,
+      qubit: 0,
+      column,
+      params: { theta: Number.NaN },
+    });
+    useCircuitEditorStore.setState({ gates: [0, 1, 2, 3, 4].map((c) => bad(`r${c}`, c)) });
+    await render(<RunPanel />);
+    const errors = validateCircuit(editor().spec());
+    expect(errors.length).toBe(5);
+    expect(screen.getAllByText(errors[0])).toHaveLength(3);
+    expect(screen.getByText('+2 more')).toBeTruthy();
   });
 
   it('shows run errors like the lesson simulation does', async () => {

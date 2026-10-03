@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { AccessibilityInfo, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector, type ComposedGesture, type GestureType, type TapGesture } from 'react-native-gesture-handler';
+import { useSharedValue } from 'react-native-reanimated';
 import Svg, { Circle, G, Line, Rect, Text as SvgText } from 'react-native-svg';
 import { scheduleOnRN } from 'react-native-worklets';
 
@@ -26,24 +27,42 @@ import { useCircuitEditorStore } from '@/stores/circuit-editor-store';
 /** Taller circuits scroll inside the canvas instead of pushing the page down. */
 const MAX_VIEWPORT_HEIGHT = 360;
 
+/** How far (px) a finger may travel and still count as a tap, and for how long. */
+export const TAP_MAX_DISTANCE = 10;
+export const TAP_MAX_DURATION_MS = 300;
+
 /**
  * The grid's tap gesture: tap → cell → `tapCell`, mapped on the UI thread.
+ * A touch that travels more than `TAP_MAX_DISTANCE` is a scroll or a flick,
+ * not a tap: the recognizer fails it (`maxDistance`), and `onEnd` checks the
+ * distance again from the touch-down point, which is also the point mapped
+ * to a cell (where the student aimed, not where the finger lifted).
  * Disabled while the screen-reader cells are shown, so one activation can't
  * reach the store twice.
  */
 export function useCanvasTapGesture(qubitCount: number, enabled = true): TapGesture {
   const tapCell = useCircuitEditorStore((s) => s.tapCell);
+  const start = useSharedValue({ x: 0, y: 0 });
   return useMemo(
     () =>
       Gesture.Tap()
+        .withTestId('canvas-tap')
         .enabled(enabled)
+        .maxDistance(TAP_MAX_DISTANCE)
+        .maxDuration(TAP_MAX_DURATION_MS)
+        .onBegin((event) => {
+          'worklet';
+          start.set({ x: event.x, y: event.y });
+        })
         .onEnd((event, success) => {
           'worklet';
           if (!success) return;
-          const cell = cellFromPoint(event.x, event.y, qubitCount);
+          const { x, y } = start.get();
+          if (Math.hypot(event.x - x, event.y - y) > TAP_MAX_DISTANCE) return;
+          const cell = cellFromPoint(x, y, qubitCount);
           if (cell) scheduleOnRN(tapCell, cell.qubit, cell.column);
         }),
-    [enabled, qubitCount, tapCell],
+    [enabled, qubitCount, start, tapCell],
   );
 }
 

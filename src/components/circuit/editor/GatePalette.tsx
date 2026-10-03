@@ -1,5 +1,5 @@
-import { memo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { memo, useEffect, useRef, useState } from 'react';
+import { AccessibilityInfo, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/ui';
 import { GateColors, MIN_TOUCH, Radii, Spacing } from '@/constants/theme';
@@ -7,6 +7,8 @@ import { GATES, isTwoQubitGate, MAIN_GATES, MORE_GATES } from '@/features/circui
 import type { GateType } from '@/features/circuit/editor/types';
 import { useTheme } from '@/hooks/use-theme';
 import { useCircuitEditorStore } from '@/stores/circuit-editor-store';
+
+import { useScreenReaderEnabled } from './CircuitCanvas';
 
 /** CNOT/CZ have a control; the other two-qubit gates just act on two qubits. */
 const hasControl = (type: GateType) => type === 'CX' || type === 'CZ';
@@ -65,7 +67,23 @@ export function GatePalette() {
   const arm = useCircuitEditorStore((s) => s.arm);
   const [moreOpen, setMoreOpen] = useState(false);
   // An armed "More" gate keeps its row visible.
-  const showMore = moreOpen || (armed !== null && MORE_GATES.includes(armed));
+  const moreArmed = armed !== null && MORE_GATES.includes(armed);
+  const showMore = moreOpen || moreArmed;
+  const status = paletteStatus(armed, pendingControl);
+  const screenReader = useScreenReaderEnabled();
+  const toggleMore = () => {
+    // Collapsing hides the armed gate's chip, so stop placing it too.
+    if (showMore && moreArmed) arm(null);
+    setMoreOpen(!showMore);
+  };
+
+  // VoiceOver doesn't announce live-region changes: speak each new step.
+  const lastStatus = useRef(status);
+  useEffect(() => {
+    if (lastStatus.current === status) return;
+    lastStatus.current = status;
+    if (screenReader) AccessibilityInfo.announceForAccessibility(status);
+  }, [screenReader, status]);
 
   return (
     <View style={styles.root}>
@@ -77,7 +95,7 @@ export function GatePalette() {
           accessibilityRole="button"
           accessibilityLabel={showMore ? 'Fewer gates' : 'More gates'}
           accessibilityState={{ expanded: showMore }}
-          onPress={() => setMoreOpen(!showMore)}
+          onPress={toggleMore}
           style={[styles.more, { borderColor: theme.border }]}>
           <Text variant="label" color="primary">
             {showMore ? 'Less' : 'More'}
@@ -92,7 +110,7 @@ export function GatePalette() {
         </ScrollView>
       ) : null}
       <Text variant="caption" color="muted" accessibilityLiveRegion="polite" testID="palette-status">
-        {paletteStatus(armed, pendingControl)}
+        {status}
       </Text>
     </View>
   );

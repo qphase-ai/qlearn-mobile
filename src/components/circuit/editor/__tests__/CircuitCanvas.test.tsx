@@ -1,5 +1,9 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { AccessibilityInfo } from 'react-native';
+import { State } from 'react-native-gesture-handler';
+import { fireGestureHandler, getByGestureTestId } from 'react-native-gesture-handler/jest-utils';
+
+import { cellCenter } from '@/features/circuit/editor/geometry';
 
 import { CircuitCanvas, cellLabel, circuitSummary } from '../CircuitCanvas';
 import { GatePalette } from '../GatePalette';
@@ -70,6 +74,50 @@ describe('CircuitCanvas', () => {
     expect(editor().selectedId).toBe(editor().gates[0].id);
     expect(screen.getByTestId('selection-ring')).toBeTruthy();
     expect(screen.getByTestId('canvas-cell-1-0')).toBeSelected();
+  });
+});
+
+describe('canvas tap gesture', () => {
+  beforeEach(() => {
+    jest.spyOn(AccessibilityInfo, 'isScreenReaderEnabled').mockResolvedValue(false);
+  });
+
+  const tapAt = async (from: { x: number; y: number }, to = from) => {
+    await act(async () => {
+      fireGestureHandler(getByGestureTestId('canvas-tap'), [
+        { state: State.BEGAN, x: from.x, y: from.y },
+        { state: State.ACTIVE, x: to.x, y: to.y },
+        { state: State.END, x: to.x, y: to.y },
+      ]);
+    });
+  };
+
+  it('places the armed gate in the tapped cell', async () => {
+    await renderEditor();
+    await fireEvent.press(screen.getByTestId('palette-H'));
+    const { x, y } = cellCenter(1, 2);
+    await tapAt({ x: x + 3, y: y - 2 }, { x: x + 5, y: y + 2 });
+    expect(editor().gates).toMatchObject([{ type: 'H', qubit: 1, column: 2 }]);
+  });
+
+  it('ignores a touch that moved too far to be a tap', async () => {
+    await renderEditor();
+    await fireEvent.press(screen.getByTestId('palette-H'));
+    await tapAt(cellCenter(0, 0), cellCenter(1, 3));
+    expect(editor().gates).toEqual([]);
+  });
+
+  it('is limited to short, still touches', async () => {
+    await renderEditor();
+    const { config } = getByGestureTestId('canvas-tap') as unknown as { config: Record<string, unknown> };
+    expect(config).toMatchObject({ enabled: true, maxDist: 10, maxDurationMs: 300 });
+  });
+
+  it('is disabled while the screen-reader cells are shown', async () => {
+    jest.spyOn(AccessibilityInfo, 'isScreenReaderEnabled').mockResolvedValue(true);
+    await renderEditor();
+    const { config } = getByGestureTestId('canvas-tap') as unknown as { config: Record<string, unknown> };
+    expect(config.enabled).toBe(false);
   });
 });
 
