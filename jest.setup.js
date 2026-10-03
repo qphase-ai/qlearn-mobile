@@ -31,3 +31,7 @@ jest.mock('expo-sqlite/kv-store', () => {
   };
   return { __esModule: true, default: api, Storage: api, AsyncStorage: api };
 });
+
+// Worklets has no native runtime under Jest: use its official mock, which runs
+// `scheduleOnRN`/`runOnJS` callbacks synchronously on the JS thread.
+jest.mock('react-native-worklets', () => require('react-native-worklets/src/mock'));

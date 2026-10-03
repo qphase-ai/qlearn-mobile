@@ -8,6 +8,7 @@ import { CircuitRunError, useCircuitRun } from '@/features/circuit/useCircuitRun
 import { toUserMessage } from '@/lib/api/errors';
 
 import { AskAboutCircuit } from './AskAboutCircuit';
+import { OpenInBuilder } from './OpenInBuilder';
 import type { BlockProps } from './types';
 
 /**
@@ -51,6 +52,7 @@ export function SimulationBlock({ circuit, shots, view, title, description }: Bl
           <ProbabilityBars result={state.result} />
         )
       ) : null}
+      <OpenInBuilder spec={circuit} title={title} />
       <AskAboutCircuit spec={circuit} title={title} />
     </Card>
   );

@@ -22,7 +22,8 @@ export function gateColor(type: string): string {
   const t = type.toUpperCase();
   if (t === 'CNOT' || t === 'CX' || t === 'CZ' || t === 'SWAP') return GateColors.CX;
   if (ROTATIONS.has(t)) return GateColors.rotation;
-  if (t === 'U3') return GateColors.U;
+  // Web parity (frontend/src/lib/gates.ts): U3 uses the SX colour, not U's.
+  if (t === 'U3') return GateColors.SX;
   return (GateColors as Record<string, string>)[t] ?? GateColors.I;
 }
 
