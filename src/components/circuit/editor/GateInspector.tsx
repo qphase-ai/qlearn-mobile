@@ -1,10 +1,10 @@
-import { Pressable, StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, Card, Text } from '@/components/ui';
 import { GateColors, MIN_TOUCH, Radii, Spacing } from '@/constants/theme';
 import { ANGLE_PRESETS, formatAngle, GATES, isTwoQubitGate, type GateParamDef } from '@/features/circuit/editor/gates';
 import { moveGate } from '@/features/circuit/editor/model';
-import type { EditorCircuit, EditorGate } from '@/features/circuit/editor/types';
+import { MAX_COLUMNS, type EditorCircuit, type EditorGate } from '@/features/circuit/editor/types';
 import { useTheme } from '@/hooks/use-theme';
 import { useCircuitEditorStore } from '@/stores/circuit-editor-store';
 
@@ -68,16 +68,24 @@ function ParamEditor({ gate, def }: { gate: EditorGate; def: GateParamDef }) {
 
 /** Inspector moves: one cell left/right (time step) or up/down (qubit), the control keeping its offset. */
 const MOVES = [
-  { icon: 'arrow-back', label: 'Move left', dq: 0, dc: -1 },
-  { icon: 'arrow-forward', label: 'Move right', dq: 0, dc: 1 },
-  { icon: 'arrow-up', label: 'Move up', dq: -1, dc: 0 },
-  { icon: 'arrow-down', label: 'Move down', dq: 1, dc: 0 },
+  { icon: 'arrow-back', fallback: 'Move left', dq: 0, dc: -1 },
+  { icon: 'arrow-forward', fallback: 'Move right', dq: 0, dc: 1 },
+  { icon: 'arrow-up', fallback: 'Move up', dq: -1, dc: 0 },
+  { icon: 'arrow-down', fallback: 'Move down', dq: 1, dc: 0 },
 ] as const;
+
+/** "qubit 2" or, for a two-qubit gate, "qubits 1 and 2" (numbered from 0, like the wire labels). */
+function qubitsText(qubit: number, control: number | undefined): string {
+  if (control === undefined) return `qubit ${qubit}`;
+  return `qubits ${Math.min(qubit, control)} and ${Math.max(qubit, control)}`;
+}
 
 /**
  * Buttons that move the selected gate one cell: the non-pointer way to do what
- * drag does on the canvas. A move the model would reject (off the grid, onto
- * another gate) is disabled rather than silently ignored.
+ * drag does on the canvas. Each is labelled with its destination ("Move to
+ * step 3", "Move to qubit 2"), and a move the model would reject (off the
+ * grid, onto another gate) is disabled rather than silently ignored. A move
+ * is announced, since the button itself doesn't change.
  */
 function MoveButtons({ gate }: { gate: EditorGate }) {
   const qubitCount = useCircuitEditorStore((s) => s.qubitCount);
@@ -86,16 +94,25 @@ function MoveButtons({ gate }: { gate: EditorGate }) {
   const circuit: EditorCircuit = { qubitCount, gates };
   return (
     <View style={styles.moves}>
-      {MOVES.map(({ icon, label, dq, dc }) => {
+      {MOVES.map(({ icon, fallback, dq, dc }) => {
         const qubit = gate.qubit + dq;
         const column = gate.column + dc;
+        const control = gate.control !== undefined ? gate.control + dq : undefined;
+        const moved = moveGate(circuit, gate.id, qubit, column);
+        const rows = [qubit, control ?? qubit];
+        const inGrid =
+          column >= 0 && column < MAX_COLUMNS && Math.min(...rows) >= 0 && Math.max(...rows) < qubitCount;
+        const label = !inGrid ? fallback : dc !== 0 ? `Move to step ${column + 1}` : `Move to ${qubitsText(qubit, control)}`;
         return (
           <IconButton
-            key={label}
+            key={fallback}
             icon={icon}
             label={label}
-            disabled={moveGate(circuit, gate.id, qubit, column) === null}
-            onPress={() => move(gate.id, qubit, column)}
+            disabled={moved === null}
+            onPress={() => {
+              if (!move(gate.id, qubit, column)) return;
+              AccessibilityInfo.announceForAccessibility(`Moved to ${qubitsText(qubit, control)}, step ${column + 1}`);
+            }}
           />
         );
       })}

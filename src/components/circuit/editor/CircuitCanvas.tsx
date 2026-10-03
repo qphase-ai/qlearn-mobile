@@ -198,8 +198,9 @@ export function CircuitCanvas() {
   const gesture = useMemo(() => Gesture.Exclusive(drag.gesture, tap), [drag.gesture, tap]);
   const dragged = drag.dragged;
   // Core ScrollViews are outside RNGH's gesture graph, so they can't be told to
-  // wait for the pan. Lock them from JS instead while a gate is lifted.
-  const scrollEnabled = dragged === null;
+  // wait for the pan. Lock them from JS instead while a gate is lifted. There
+  // is no edge auto-scroll while dragging; see `DraggableGates`.
+  const scrollEnabled = !drag.dragging;
 
   const { width, height, columns } = canvasSize(qubitCount, usedColumns({ qubitCount, gates }));
   const summary = useMemo(() => circuitSummary(qubitCount, gates), [qubitCount, gates]);

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
+import { AccessibilityInfo } from 'react-native';
 
 import { useCircuitEditorStore } from '@/stores/circuit-editor-store';
 
@@ -47,6 +48,7 @@ describe('GateInspector', () => {
   });
 
   it('moves the selected gate one cell at a time, disabling moves the model would reject', async () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
     select({
       gates: [
         { id: 'h', type: 'H', qubit: 0, column: 0 },
@@ -56,34 +58,42 @@ describe('GateInspector', () => {
     });
     await render(<GateInspector />);
     const button = (name: string) => screen.getByRole('button', { name });
-    // Column 0, qubit 0: nothing to the left or above.
+    // Column 0, qubit 0: nothing to the left or above, so those keep a plain label.
     expect(button('Move left')).toBeDisabled();
     expect(button('Move up')).toBeDisabled();
-    expect(button('Move down')).toBeEnabled();
+    expect(button('Move to qubit 1')).toBeEnabled();
 
-    await fireEvent.press(button('Move right'));
+    await fireEvent.press(button('Move to step 2'));
     expect(editor().gates[0]).toMatchObject({ id: 'h', qubit: 0, column: 1 });
     expect(editor().selectedId).toBe('h');
+    expect(announce).toHaveBeenLastCalledWith('Moved to qubit 0, step 2');
     expect(screen.getByText(/Qubit q0 · step 2/)).toBeTruthy();
-    // The X now sits right below.
-    expect(button('Move down')).toBeDisabled();
-    expect(button('Move left')).toBeEnabled();
+    // The X now sits right below; the labels follow the gate.
+    expect(button('Move to qubit 1')).toBeDisabled();
+    expect(button('Move to step 1')).toBeEnabled();
+    expect(button('Move to step 3')).toBeEnabled();
 
-    await fireEvent.press(button('Move down')); // disabled: no change, no undo step
+    await fireEvent.press(button('Move to qubit 1')); // disabled: no change, no undo step
     expect(editor().gates[0]).toMatchObject({ qubit: 0, column: 1 });
     expect(editor().past).toHaveLength(1);
+    expect(announce).toHaveBeenCalledTimes(1);
 
-    await fireEvent.press(button('Move left'));
+    await fireEvent.press(button('Move to step 1'));
     expect(editor().gates[0]).toMatchObject({ qubit: 0, column: 0 });
+    expect(announce).toHaveBeenLastCalledWith('Moved to qubit 0, step 1');
+    announce.mockRestore();
   });
 
   it('moves a two-qubit gate with its control, within the qubit range', async () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
     select({ qubitCount: 3, gates: [{ id: 'c', type: 'CX', qubit: 1, control: 0, column: 0 }], selectedId: 'c' });
     await render(<GateInspector />);
     expect(screen.getByRole('button', { name: 'Move up' })).toBeDisabled(); // control would leave the grid
-    await fireEvent.press(screen.getByRole('button', { name: 'Move down' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Move to qubits 1 and 2' }));
     expect(editor().gates[0]).toMatchObject({ qubit: 2, control: 1 });
+    expect(announce).toHaveBeenLastCalledWith('Moved to qubits 1 and 2, step 1');
     expect(screen.getByRole('button', { name: 'Move down' })).toBeDisabled();
+    announce.mockRestore();
   });
 
   it('steps angles on the π/12 grid within ±2π', () => {

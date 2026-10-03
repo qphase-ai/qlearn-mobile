@@ -31,6 +31,12 @@ import { GateGlyph } from './GateGlyph';
  * model; a rejected drop springs the copy back and leaves the circuit as it
  * was. Drag is a pointer enhancement: screen-reader and keyboard users move
  * gates with the inspector's move buttons instead.
+ *
+ * Known limits: the canvas does not auto-scroll when the gate is dragged to
+ * its edge (the scroll views are locked during a drag), so cells off screen
+ * are reached with the inspector's Move buttons, or by dropping, scrolling
+ * and dragging again. There is no haptic on lift: expo-haptics is not a
+ * dependency yet (a Phase 6 candidate).
  */
 
 /** Hold this long (ms) on a gate, without moving, before it lifts. Shorter than the tap's 300 ms limit. */
@@ -42,18 +48,27 @@ const SPRING = { duration: 400, dampingRatio: 0.8 };
 /** `hoverKey` before the first update of a drag, so the first cell is always reported. */
 const HOVER_UNSET = -2;
 
-type DragCell = Pick<EditorGate, 'qubit' | 'column' | 'control'>;
+/**
+ * What a worklet knows about a gate. The drag copies the pressed gate's
+ * snapshot at touch-down and uses it until the drag ends, so an edit made
+ * mid-drag (a second finger on Undo or Delete) can't swap the gate under it.
+ */
+type DragSnapshot = Pick<EditorGate, 'id' | 'qubit' | 'column' | 'control'>;
 
 export interface DropHover extends Cell {
   /** Whether `moveGate` would accept this drop. */
   valid: boolean;
+  /** The other qubit the gate would cover (its control), if it is a two-qubit gate. */
+  control?: number;
 }
 
 export interface CanvasDrag {
   gesture: PanGesture;
-  /** The gate being dragged (also while a rejected drop springs back), or null. */
+  /** True from lift-off until the copy is dropped or has sprung back. */
+  dragging: boolean;
+  /** The dragged gate as it is now in the circuit; null if it was removed mid-drag. */
   dragged: EditorGate | null;
-  /** The cell the gate would drop into, or null when it is off the grid. */
+  /** Where the gate would drop, or null when it is off the grid. */
   hover: DropHover | null;
   translateX: SharedValue<number>;
   translateY: SharedValue<number>;
@@ -71,24 +86,28 @@ export function useCanvasDragGesture(qubitCount: number, gates: EditorGate[], en
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [hoverCell, setHoverCell] = useState<Cell | null>(null);
 
-  const index = useSharedValue(-1);
+  const snapshot = useSharedValue<DragSnapshot | null>(null);
   const hoverKey = useSharedValue(HOVER_UNSET);
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
   const lift = useSharedValue(0);
 
-  // A plain snapshot for the worklets (ids kept on the JS side), rebuilt per edit.
-  const cells = useMemo<DragCell[]>(
+  // Plain copies for the worklets, rebuilt per edit.
+  const cells = useMemo<DragSnapshot[]>(
     () =>
-      gates.map((g) => ({ qubit: g.qubit, column: g.column, ...(g.control !== undefined ? { control: g.control } : {}) })),
+      gates.map((g) => ({
+        id: g.id,
+        qubit: g.qubit,
+        column: g.column,
+        ...(g.control !== undefined ? { control: g.control } : {}),
+      })),
     [gates],
   );
-  const ids = useMemo(() => gates.map((g) => g.id), [gates]);
 
-  const start = useCallback((i: number) => {
-    setDraggedId(ids[i] ?? null);
+  const start = useCallback((id: string) => {
+    setDraggedId(id);
     setHoverCell(null);
-  }, [ids]);
+  }, []);
 
   const hover = useCallback((qubit: number, column: number) => {
     setHoverCell(qubit < 0 ? null : { qubit, column });
@@ -99,21 +118,20 @@ export function useCanvasDragGesture(qubitCount: number, gates: EditorGate[], en
   }, []);
 
   const drop = useCallback(
-    (i: number, qubit: number, column: number) => {
-      const gate = gates[i];
+    (id: string, qubit: number, column: number) => {
       setHoverCell(null);
-      if (!gate) return;
-      if (qubit >= 0 && storeMoveGate(gate.id, qubit, column)) {
-        select(gate.id);
-        translateX.set(0);
-        translateY.set(0);
-        lift.set(0);
+      // Read the live circuit: the gate may have moved or gone since the drag began.
+      const gate = useCircuitEditorStore.getState().gates.find((g) => g.id === id);
+      if (gate && qubit >= 0 && storeMoveGate(id, qubit, column)) {
+        select(id);
+        // The shared values are left as they are: the copy unmounts with this
+        // render, and the next drag's onStart resets them. Resetting here would
+        // flash the copy at the old cell for a frame.
         setDraggedId(null);
         return;
       }
       // Dropped back on its own cell: a long press without a move selects the gate.
-      if (qubit === gate.qubit && column === gate.column) select(gate.id);
-      const id = gate.id;
+      if (gate && qubit === gate.qubit && column === gate.column) select(id);
       const done = (finished?: boolean) => {
         'worklet';
         // Interrupted by a new drag: that drag owns the overlay now.
@@ -127,7 +145,7 @@ export function useCanvasDragGesture(qubitCount: number, gates: EditorGate[], en
       translateY.set(withSpring(0, SPRING, xLonger ? undefined : done));
       lift.set(withTiming(0, { duration: LIFT_MS }));
     },
-    [finish, gates, lift, select, storeMoveGate, translateX, translateY],
+    [finish, lift, select, storeMoveGate, translateX, translateY],
   );
 
   const gesture = useMemo(
@@ -135,34 +153,38 @@ export function useCanvasDragGesture(qubitCount: number, gates: EditorGate[], en
       Gesture.Pan()
         .withTestId('canvas-drag')
         .enabled(enabled)
+        .maxPointers(1)
         .activateAfterLongPress(DRAG_LONG_PRESS_MS)
         .onTouchesDown((event, manager) => {
           'worklet';
-          // Not on a gate: fail at once, so the tap and the scroll views keep the touch.
+          // Only the first finger decides. Not on a gate: fail at once, so the
+          // tap and the scroll views keep the touch.
+          if (event.numberOfTouches !== 1) return;
           const touch = event.allTouches[0];
           if (!touch || gateIndexAt(cells, touch.x, touch.y, qubitCount) < 0) manager.fail();
         })
         .onBegin((event) => {
           'worklet';
-          index.set(gateIndexAt(cells, event.x, event.y, qubitCount));
+          const i = gateIndexAt(cells, event.x, event.y, qubitCount);
+          snapshot.set(i < 0 ? null : cells[i]);
         })
         .onStart(() => {
           'worklet';
-          const i = index.get();
-          if (i < 0) return;
+          const gate = snapshot.get();
+          if (!gate) return;
           translateX.set(0);
           translateY.set(0);
           lift.set(withTiming(1, { duration: LIFT_MS }));
           hoverKey.set(HOVER_UNSET);
-          scheduleOnRN(start, i);
+          scheduleOnRN(start, gate.id);
         })
         .onUpdate((event) => {
           'worklet';
-          const i = index.get();
-          if (i < 0) return;
+          const gate = snapshot.get();
+          if (!gate) return;
           translateX.set(event.translationX);
           translateY.set(event.translationY);
-          const target = dropTarget(cells[i], event.translationX, event.translationY, qubitCount);
+          const target = dropTarget(gate, event.translationX, event.translationY, qubitCount);
           const key = target ? target.qubit * MAX_COLUMNS + target.column : -1;
           if (key === hoverKey.get()) return;
           hoverKey.set(key);
@@ -170,26 +192,27 @@ export function useCanvasDragGesture(qubitCount: number, gates: EditorGate[], en
         })
         .onEnd((event, success) => {
           'worklet';
-          const i = index.get();
-          if (i < 0) return;
-          const target = success ? dropTarget(cells[i], event.translationX, event.translationY, qubitCount) : null;
-          scheduleOnRN(drop, i, target ? target.qubit : -1, target ? target.column : -1);
+          const gate = snapshot.get();
+          if (!gate) return;
+          const target = success ? dropTarget(gate, event.translationX, event.translationY, qubitCount) : null;
+          scheduleOnRN(drop, gate.id, target ? target.qubit : -1, target ? target.column : -1);
         })
         .onFinalize(() => {
           'worklet';
-          index.set(-1);
+          snapshot.set(null);
         }),
-    [cells, drop, enabled, hover, hoverKey, index, lift, qubitCount, start, translateX, translateY],
+    [cells, drop, enabled, hover, hoverKey, lift, qubitCount, snapshot, start, translateX, translateY],
   );
 
   const dragged = draggedId ? (gates.find((g) => g.id === draggedId) ?? null) : null;
   const hoverState = useMemo<DropHover | null>(() => {
     if (!dragged || !hoverCell) return null;
     const valid = moveGate({ qubitCount, gates }, dragged.id, hoverCell.qubit, hoverCell.column) !== null;
-    return { ...hoverCell, valid };
+    const control = dragged.control !== undefined ? dragged.control + (hoverCell.qubit - dragged.qubit) : undefined;
+    return { ...hoverCell, valid, ...(control !== undefined ? { control } : {}) };
   }, [dragged, gates, hoverCell, qubitCount]);
 
-  return { gesture, dragged, hover: hoverState, translateX, translateY, lift };
+  return { gesture, dragging: draggedId !== null, dragged, hover: hoverState, translateX, translateY, lift };
 }
 
 /** Where a gate is drawn: its column, from the top of its first row to the bottom of its last. */
@@ -201,17 +224,23 @@ function gateBounds(gate: EditorGate) {
   return { left: target.x - GRID.COL_W / 2, top, width: GRID.COL_W, height: bottom - top };
 }
 
-/** The drop-target cell, drawn inside the canvas SVG: accent when the drop is allowed, error when not. */
+/**
+ * Where the gate would land, drawn inside the canvas SVG over every row it
+ * would cover: accent when the drop is allowed, error when not.
+ */
 export function DropHighlight({ hover }: { hover: DropHover }) {
   const theme = useTheme();
-  const { x, y } = cellCenter(hover.qubit, hover.column);
+  const target = cellCenter(hover.qubit, hover.column);
+  const other = cellCenter(hover.control ?? hover.qubit, hover.column);
+  const top = Math.min(target.y, other.y) - GRID.ROW_H / 2;
+  const bottom = Math.max(target.y, other.y) + GRID.ROW_H / 2;
   const color = hover.valid ? theme.primary : theme.error;
   return (
     <Rect
-      x={x - GRID.COL_W / 2 + 2}
-      y={y - GRID.ROW_H / 2 + 2}
+      x={target.x - GRID.COL_W / 2 + 2}
+      y={top + 2}
       width={GRID.COL_W - 4}
-      height={GRID.ROW_H - 4}
+      height={bottom - top - 4}
       rx={Radii.md}
       fill={theme.overlay}
       stroke={color}

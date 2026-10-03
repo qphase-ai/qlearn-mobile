@@ -148,10 +148,33 @@ describe('canvas drag gesture', () => {
     });
   };
 
+  /**
+   * Drive the drag event by event (as fireGestureHandler does), to look at
+   * the canvas or change the store mid-drag.
+   */
+  const manualDrag = (q: number, c: number) => {
+    const { x, y } = cellCenter(q, c);
+    const at = (tx: number, ty: number) => ({ x: x + tx, y: y + ty, translationX: tx, translationY: ty });
+    const emit = (name: string, e: Record<string, unknown>) =>
+      act(async () => {
+        const { handlerTag } = getByGestureTestId('canvas-drag');
+        DeviceEventEmitter.emit(name, { handlerTag, numberOfPointers: 1, ...e });
+      });
+    return {
+      begin: async () => {
+        await emit('onGestureHandlerStateChange', { state: State.BEGAN, oldState: State.UNDETERMINED, ...at(0, 0) });
+        await emit('onGestureHandlerStateChange', { state: State.ACTIVE, oldState: State.BEGAN, ...at(0, 0) });
+      },
+      moveTo: (tx: number, ty: number) => emit('onGestureHandlerEvent', { state: State.ACTIVE, ...at(tx, ty) }),
+      end: (tx: number, ty: number) =>
+        emit('onGestureHandlerStateChange', { state: State.END, oldState: State.ACTIVE, ...at(tx, ty) }),
+    };
+  };
+
   it('is a pan that activates after a 250 ms long press, beside the tap', async () => {
     useCircuitEditorStore.setState({ gates: [{ id: 'h', type: 'H', qubit: 0, column: 0 }] });
     await renderEditor();
-    expect(config('canvas-drag')).toMatchObject({ enabled: true, activateAfterLongPress: 250 });
+    expect(config('canvas-drag')).toMatchObject({ enabled: true, activateAfterLongPress: 250, maxPointers: 1 });
     expect(config('canvas-tap').enabled).toBe(true);
   });
 
@@ -198,40 +221,84 @@ describe('canvas drag gesture', () => {
       ],
     });
     await renderEditor();
-    const { x, y } = cellCenter(0, 0);
-    const handler = getByGestureTestId('canvas-drag');
-    // Drive the gesture event by event (as fireGestureHandler does), to see the state mid-drag.
-    const emit = (name: string, e: Record<string, unknown>) =>
-      DeviceEventEmitter.emit(name, { handlerTag: handler.handlerTag, numberOfPointers: 1, ...e });
-    const move = (tx: number, ty: number) => ({ x: x + tx, y: y + ty, translationX: tx, translationY: ty });
-    await act(async () => {
-      emit('onGestureHandlerStateChange', { state: State.BEGAN, oldState: State.UNDETERMINED, ...move(0, 0) });
-      emit('onGestureHandlerStateChange', { state: State.ACTIVE, oldState: State.BEGAN, ...move(0, 0) });
-      emit('onGestureHandlerEvent', { state: State.ACTIVE, ...move(GRID.COL_W, 0) });
-    });
+    const drag = manualDrag(0, 0);
+    await drag.begin();
+    await drag.moveTo(GRID.COL_W, 0);
     expect(screen.getByTestId('lifted-gate')).toBeTruthy();
     expect(screen.getByTestId('gate-dimmed')).toBeTruthy();
     expect(screen.getByTestId('drop-target')).toBeTruthy();
     expect(screen.getByTestId('canvas-scroll-horizontal').props.scrollEnabled).toBe(false);
     expect(screen.getByTestId('canvas-scroll-vertical').props.scrollEnabled).toBe(false);
 
-    await act(async () => {
-      emit('onGestureHandlerEvent', { state: State.ACTIVE, ...move(0, GRID.ROW_H) }); // onto the X
-    });
+    await drag.moveTo(0, GRID.ROW_H); // onto the X
     expect(screen.getByTestId('drop-target-invalid')).toBeTruthy();
     expect(screen.queryByTestId('drop-target')).toBeNull();
 
-    await act(async () => {
-      emit('onGestureHandlerEvent', { state: State.ACTIVE, ...move(-3 * GRID.COL_W, 0) }); // off the grid
-    });
+    await drag.moveTo(-3 * GRID.COL_W, 0); // off the grid
     expect(screen.queryByTestId('drop-target-invalid')).toBeNull();
     expect(screen.queryByTestId('drop-target')).toBeNull();
 
-    await act(async () => {
-      emit('onGestureHandlerStateChange', { state: State.END, oldState: State.ACTIVE, ...move(GRID.COL_W, 0) });
-    });
+    await drag.end(GRID.COL_W, 0);
     expect(editor().gates[0]).toMatchObject({ id: 'h', qubit: 0, column: 1 });
     expect(screen.getByTestId('canvas-scroll-horizontal').props.scrollEnabled).toBe(true);
+  });
+
+  it('highlights every row a two-qubit gate would cover', async () => {
+    useCircuitEditorStore.setState({ qubitCount: 3, gates: [{ id: 'cx', type: 'CX', qubit: 1, control: 0, column: 0 }] });
+    await renderEditor();
+    const drag = manualDrag(1, 0);
+    await drag.begin();
+    await drag.moveTo(GRID.COL_W, GRID.ROW_H); // target q2, control q1, step 2
+    const rect = screen.getByTestId('drop-target').props;
+    expect(rect.height).toBe(2 * GRID.ROW_H - 4);
+    expect(rect.y).toBe(cellCenter(1, 1).y - GRID.ROW_H / 2 + 2);
+    await drag.end(GRID.COL_W, GRID.ROW_H);
+    expect(editor().gates[0]).toMatchObject({ qubit: 2, control: 1, column: 1 });
+  });
+
+  it('keeps dragging the same gate when an earlier gate is removed mid-drag', async () => {
+    useCircuitEditorStore.setState({
+      gates: [
+        { id: 'a', type: 'X', qubit: 1, column: 0 },
+        { id: 'h', type: 'H', qubit: 0, column: 1 },
+      ],
+    });
+    await renderEditor();
+    const drag = manualDrag(0, 1);
+    await drag.begin();
+    await drag.moveTo(GRID.COL_W / 2, 0);
+    await act(async () => {
+      useCircuitEditorStore.setState({ gates: editor().gates.filter((g) => g.id !== 'a') });
+    });
+    await drag.moveTo(GRID.COL_W, 0);
+    await drag.end(GRID.COL_W, 0);
+    expect(editor().gates).toEqual([{ id: 'h', type: 'H', qubit: 0, column: 2 }]);
+    expect(editor().selectedId).toBe('h');
+  });
+
+  it('moves nothing when the dragged gate is removed mid-drag', async () => {
+    useCircuitEditorStore.setState({
+      gates: [
+        { id: 'h', type: 'H', qubit: 0, column: 0 },
+        { id: 'x', type: 'X', qubit: 1, column: 1 },
+      ],
+    });
+    await renderEditor();
+    const drag = manualDrag(0, 0);
+    await drag.begin();
+    await drag.moveTo(GRID.COL_W, 0);
+    await act(async () => {
+      useCircuitEditorStore.setState({ gates: editor().gates.filter((g) => g.id !== 'h') });
+    });
+    expect(screen.queryByTestId('lifted-gate')).toBeNull();
+    expect(screen.getByTestId('canvas-scroll-horizontal').props.scrollEnabled).toBe(false); // still dragging
+    await drag.moveTo(GRID.COL_W, GRID.ROW_H);
+    await drag.end(GRID.COL_W, GRID.ROW_H);
+    expect(editor().gates).toEqual([{ id: 'x', type: 'X', qubit: 1, column: 1 }]);
+    expect(editor().selectedId).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('canvas-scroll-horizontal').props.scrollEnabled).toBe(true), {
+      timeout: 3000,
+    });
   });
 
   it('springs back and leaves the circuit unchanged on a rejected drop', async () => {
