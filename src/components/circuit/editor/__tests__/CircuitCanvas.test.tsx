@@ -1,9 +1,10 @@
-import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { AccessibilityInfo } from 'react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { AccessibilityInfo, DeviceEventEmitter } from 'react-native';
 import { State } from 'react-native-gesture-handler';
 import { fireGestureHandler, getByGestureTestId } from 'react-native-gesture-handler/jest-utils';
 
-import { cellCenter } from '@/features/circuit/editor/geometry';
+import { cellCenter, GRID } from '@/features/circuit/editor/geometry';
+import { useCircuitEditorStore } from '@/stores/circuit-editor-store';
 
 import { CircuitCanvas, cellLabel, circuitSummary } from '../CircuitCanvas';
 import { GatePalette } from '../GatePalette';
@@ -118,6 +119,166 @@ describe('canvas tap gesture', () => {
     await renderEditor();
     const { config } = getByGestureTestId('canvas-tap') as unknown as { config: Record<string, unknown> };
     expect(config.enabled).toBe(false);
+  });
+});
+
+describe('canvas drag gesture', () => {
+  beforeEach(() => {
+    jest.spyOn(AccessibilityInfo, 'isScreenReaderEnabled').mockResolvedValue(false);
+  });
+
+  const config = (testId: string) =>
+    (getByGestureTestId(testId) as unknown as { config: Record<string, unknown> }).config;
+
+  /**
+   * Long-press the cell (q, c) and drag by (dx, dy). The jest utilities emit
+   * the handler's events directly, so the 250 ms hold is not simulated: ACTIVE
+   * stands for "the long press elapsed".
+   */
+  const dragFrom = async (q: number, c: number, dx: number, dy: number) => {
+    const { x, y } = cellCenter(q, c);
+    const at = (tx: number, ty: number) => ({ x: x + tx, y: y + ty, translationX: tx, translationY: ty });
+    await act(async () => {
+      fireGestureHandler(getByGestureTestId('canvas-drag'), [
+        { state: State.BEGAN, ...at(0, 0) },
+        { state: State.ACTIVE, ...at(0, 0) },
+        { state: State.ACTIVE, ...at(dx, dy) },
+        { state: State.END, ...at(dx, dy) },
+      ]);
+    });
+  };
+
+  it('is a pan that activates after a 250 ms long press, beside the tap', async () => {
+    useCircuitEditorStore.setState({ gates: [{ id: 'h', type: 'H', qubit: 0, column: 0 }] });
+    await renderEditor();
+    expect(config('canvas-drag')).toMatchObject({ enabled: true, activateAfterLongPress: 250 });
+    expect(config('canvas-tap').enabled).toBe(true);
+  });
+
+  it('is disabled while a gate is armed (placement mode)', async () => {
+    await renderEditor();
+    await fireEvent.press(screen.getByTestId('palette-H'));
+    expect(config('canvas-drag').enabled).toBe(false);
+  });
+
+  it('is disabled while the screen-reader cells are shown', async () => {
+    jest.spyOn(AccessibilityInfo, 'isScreenReaderEnabled').mockResolvedValue(true);
+    await renderEditor();
+    expect(config('canvas-drag').enabled).toBe(false);
+  });
+
+  it('moves a long-pressed gate to the cell it is dropped on and selects it', async () => {
+    useCircuitEditorStore.setState({
+      gates: [
+        { id: 'h', type: 'H', qubit: 0, column: 0 },
+        { id: 'cx', type: 'CX', qubit: 1, control: 0, column: 1 },
+      ],
+    });
+    await renderEditor();
+    await dragFrom(0, 0, 2 * GRID.COL_W + 10, GRID.ROW_H - 12);
+    expect(editor().gates[0]).toMatchObject({ id: 'h', qubit: 1, column: 2 });
+    expect(editor().selectedId).toBe('h');
+    expect(editor().past).toHaveLength(1);
+    expect(screen.queryByTestId('lifted-gate')).toBeNull();
+    expect(screen.queryByTestId('gate-dimmed')).toBeNull();
+  });
+
+  it('moves a two-qubit gate by its crossed row, keeping the control offset', async () => {
+    useCircuitEditorStore.setState({ qubitCount: 3, gates: [{ id: 'cx', type: 'CX', qubit: 2, control: 0, column: 0 }] });
+    await renderEditor();
+    await dragFrom(1, 0, GRID.COL_W, 0); // grab the middle (crossed) row
+    expect(editor().gates[0]).toMatchObject({ qubit: 2, control: 0, column: 1 });
+  });
+
+  it('lifts the gate and highlights the drop cell while dragging', async () => {
+    useCircuitEditorStore.setState({
+      gates: [
+        { id: 'h', type: 'H', qubit: 0, column: 0 },
+        { id: 'x', type: 'X', qubit: 1, column: 0 },
+      ],
+    });
+    await renderEditor();
+    const { x, y } = cellCenter(0, 0);
+    const handler = getByGestureTestId('canvas-drag');
+    // Drive the gesture event by event (as fireGestureHandler does), to see the state mid-drag.
+    const emit = (name: string, e: Record<string, unknown>) =>
+      DeviceEventEmitter.emit(name, { handlerTag: handler.handlerTag, numberOfPointers: 1, ...e });
+    const move = (tx: number, ty: number) => ({ x: x + tx, y: y + ty, translationX: tx, translationY: ty });
+    await act(async () => {
+      emit('onGestureHandlerStateChange', { state: State.BEGAN, oldState: State.UNDETERMINED, ...move(0, 0) });
+      emit('onGestureHandlerStateChange', { state: State.ACTIVE, oldState: State.BEGAN, ...move(0, 0) });
+      emit('onGestureHandlerEvent', { state: State.ACTIVE, ...move(GRID.COL_W, 0) });
+    });
+    expect(screen.getByTestId('lifted-gate')).toBeTruthy();
+    expect(screen.getByTestId('gate-dimmed')).toBeTruthy();
+    expect(screen.getByTestId('drop-target')).toBeTruthy();
+    expect(screen.getByTestId('canvas-scroll-horizontal').props.scrollEnabled).toBe(false);
+    expect(screen.getByTestId('canvas-scroll-vertical').props.scrollEnabled).toBe(false);
+
+    await act(async () => {
+      emit('onGestureHandlerEvent', { state: State.ACTIVE, ...move(0, GRID.ROW_H) }); // onto the X
+    });
+    expect(screen.getByTestId('drop-target-invalid')).toBeTruthy();
+    expect(screen.queryByTestId('drop-target')).toBeNull();
+
+    await act(async () => {
+      emit('onGestureHandlerEvent', { state: State.ACTIVE, ...move(-3 * GRID.COL_W, 0) }); // off the grid
+    });
+    expect(screen.queryByTestId('drop-target-invalid')).toBeNull();
+    expect(screen.queryByTestId('drop-target')).toBeNull();
+
+    await act(async () => {
+      emit('onGestureHandlerStateChange', { state: State.END, oldState: State.ACTIVE, ...move(GRID.COL_W, 0) });
+    });
+    expect(editor().gates[0]).toMatchObject({ id: 'h', qubit: 0, column: 1 });
+    expect(screen.getByTestId('canvas-scroll-horizontal').props.scrollEnabled).toBe(true);
+  });
+
+  it('springs back and leaves the circuit unchanged on a rejected drop', async () => {
+    useCircuitEditorStore.setState({
+      gates: [
+        { id: 'h', type: 'H', qubit: 0, column: 0 },
+        { id: 'x', type: 'X', qubit: 1, column: 0 },
+      ],
+    });
+    await renderEditor();
+    const before = editor().gates;
+    await dragFrom(0, 0, 0, GRID.ROW_H); // onto the X
+    expect(editor().gates).toBe(before);
+    expect(editor().past).toHaveLength(0);
+    // The lifted copy stays until it has sprung back, and the scroll views stay locked.
+    expect(screen.getByTestId('lifted-gate')).toBeTruthy();
+    expect(screen.getByTestId('canvas-scroll-horizontal').props.scrollEnabled).toBe(false);
+    // Real (short) animation frames: fake timers can't advance Reanimated's frame clock.
+    await waitFor(() => expect(screen.queryByTestId('lifted-gate')).toBeNull(), { timeout: 3000 });
+    expect(screen.getByTestId('canvas-scroll-horizontal').props.scrollEnabled).toBe(true);
+  });
+
+  it('springs back when dropped off the grid', async () => {
+    useCircuitEditorStore.setState({ gates: [{ id: 'h', type: 'H', qubit: 0, column: 0 }] });
+    await renderEditor();
+    await dragFrom(0, 0, -2 * GRID.COL_W, 0);
+    expect(editor().gates[0]).toMatchObject({ qubit: 0, column: 0 });
+    expect(editor().past).toHaveLength(0);
+    await waitFor(() => expect(screen.queryByTestId('lifted-gate')).toBeNull(), { timeout: 3000 });
+  });
+
+  it('selects the gate when it is dropped back on its own cell', async () => {
+    useCircuitEditorStore.setState({ gates: [{ id: 'h', type: 'H', qubit: 0, column: 0 }] });
+    await renderEditor();
+    await dragFrom(0, 0, 8, -6);
+    expect(editor().selectedId).toBe('h');
+    expect(editor().past).toHaveLength(0);
+    await waitFor(() => expect(screen.queryByTestId('lifted-gate')).toBeNull(), { timeout: 3000 });
+  });
+
+  it('does nothing when the press is not on a gate', async () => {
+    useCircuitEditorStore.setState({ gates: [{ id: 'h', type: 'H', qubit: 0, column: 0 }] });
+    await renderEditor();
+    await dragFrom(1, 1, -GRID.COL_W, -GRID.ROW_H);
+    expect(editor().gates[0]).toMatchObject({ qubit: 0, column: 0 });
+    expect(editor().selectedId).toBeNull();
+    expect(screen.queryByTestId('lifted-gate')).toBeNull();
   });
 });
 

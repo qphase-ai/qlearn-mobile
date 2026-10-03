@@ -67,6 +67,8 @@ interface CircuitEditorState {
   arm: (type: GateType | null) => void;
   /** A tap on a canvas cell, interpreted by the armed/pending state. */
   tapCell: (qubit: number, column: number) => void;
+  /** Select a gate by id (null, or an unknown id, clears the selection). Disarms the palette. */
+  select: (id: string | null) => void;
   /** Move a gate's target (the control keeps its offset). False when the drop is rejected. */
   moveGate: (id: string, qubit: number, column: number) => boolean;
   updateParams: (id: string, params: GateParams) => void;
@@ -227,6 +229,8 @@ export const useCircuitEditorStore = create<CircuitEditorState>()(
           );
         },
 
+        select: (id) =>
+          set((s) => ({ selectedId: keepSelection(id, s.gates), armed: null, pendingControl: null })),
         moveGate: (id, qubit, column) => apply((c) => model.moveGate(c, id, qubit, column)),
         updateParams: (id, params) => {
           apply((c) => model.updateParams(c, id, params));

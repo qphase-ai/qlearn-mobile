@@ -3,7 +3,8 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Button, Card, Text } from '@/components/ui';
 import { GateColors, MIN_TOUCH, Radii, Spacing } from '@/constants/theme';
 import { ANGLE_PRESETS, formatAngle, GATES, isTwoQubitGate, type GateParamDef } from '@/features/circuit/editor/gates';
-import type { EditorGate } from '@/features/circuit/editor/types';
+import { moveGate } from '@/features/circuit/editor/model';
+import type { EditorCircuit, EditorGate } from '@/features/circuit/editor/types';
 import { useTheme } from '@/hooks/use-theme';
 import { useCircuitEditorStore } from '@/stores/circuit-editor-store';
 
@@ -65,6 +66,43 @@ function ParamEditor({ gate, def }: { gate: EditorGate; def: GateParamDef }) {
   );
 }
 
+/** Inspector moves: one cell left/right (time step) or up/down (qubit), the control keeping its offset. */
+const MOVES = [
+  { icon: 'arrow-back', label: 'Move left', dq: 0, dc: -1 },
+  { icon: 'arrow-forward', label: 'Move right', dq: 0, dc: 1 },
+  { icon: 'arrow-up', label: 'Move up', dq: -1, dc: 0 },
+  { icon: 'arrow-down', label: 'Move down', dq: 1, dc: 0 },
+] as const;
+
+/**
+ * Buttons that move the selected gate one cell: the non-pointer way to do what
+ * drag does on the canvas. A move the model would reject (off the grid, onto
+ * another gate) is disabled rather than silently ignored.
+ */
+function MoveButtons({ gate }: { gate: EditorGate }) {
+  const qubitCount = useCircuitEditorStore((s) => s.qubitCount);
+  const gates = useCircuitEditorStore((s) => s.gates);
+  const move = useCircuitEditorStore((s) => s.moveGate);
+  const circuit: EditorCircuit = { qubitCount, gates };
+  return (
+    <View style={styles.moves}>
+      {MOVES.map(({ icon, label, dq, dc }) => {
+        const qubit = gate.qubit + dq;
+        const column = gate.column + dc;
+        return (
+          <IconButton
+            key={label}
+            icon={icon}
+            label={label}
+            disabled={moveGate(circuit, gate.id, qubit, column) === null}
+            onPress={() => move(gate.id, qubit, column)}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
 /** Edits the selected gate. Renders nothing when no gate is selected. */
 export function GateInspector() {
   const gate = useCircuitEditorStore((s) => s.gates.find((g) => g.id === s.selectedId) ?? null);
@@ -108,6 +146,7 @@ export function GateInspector() {
       {def.params.map((p) => (
         <ParamEditor key={p.key} gate={gate} def={p} />
       ))}
+      <MoveButtons gate={gate} />
       <View style={styles.actions}>
         {twoQubit ? (
           <Button
@@ -148,6 +187,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  moves: { flexDirection: 'row', gap: Spacing.sm },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   action: { flexGrow: 1 },
 });

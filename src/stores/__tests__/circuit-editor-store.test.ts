@@ -173,6 +173,15 @@ describe('editing actions', () => {
     expect(store().past).toHaveLength(1);
   });
 
+  it('selects a gate by id, disarming the palette, and ignores unknown ids', () => {
+    useCircuitEditorStore.setState({ gates: [h('a', 0, 0)], armed: 'CX', pendingControl: { qubit: 0, column: 1 } });
+    store().select('a');
+    expect(store()).toMatchObject({ selectedId: 'a', armed: null, pendingControl: null });
+    store().select('missing');
+    expect(store().selectedId).toBeNull();
+    expect(store().past).toHaveLength(0);
+  });
+
   it('updates params and swaps control/target', () => {
     useCircuitEditorStore.setState({
       gates: [

@@ -1,24 +1,28 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AccessibilityInfo, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { Gesture, GestureDetector, type ComposedGesture, type GestureType, type TapGesture } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, type TapGesture } from 'react-native-gesture-handler';
 import { useSharedValue } from 'react-native-reanimated';
-import Svg, { Circle, G, Line, Rect, Text as SvgText } from 'react-native-svg';
+import Svg, { G, Line, Rect, Text as SvgText } from 'react-native-svg';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { GateColors, Radii } from '@/constants/theme';
 import { formatAngle, GATES, isTwoQubitGate } from '@/features/circuit/editor/gates';
 import { canvasSize, cellCenter, cellFromPoint, GRID } from '@/features/circuit/editor/geometry';
 import { gateAt, usedColumns } from '@/features/circuit/editor/model';
-import type { EditorGate, GateType } from '@/features/circuit/editor/types';
+import type { EditorGate } from '@/features/circuit/editor/types';
 import { useTheme } from '@/hooks/use-theme';
 import { useCircuitEditorStore } from '@/stores/circuit-editor-store';
+
+import { DropHighlight, LiftedGate, useCanvasDragGesture } from './DraggableGates';
+import { GateGlyph } from './GateGlyph';
 
 /**
  * The editable circuit: one SVG and one tap gesture for the whole grid. A tap
  * is mapped to a cell with `cellFromPoint` and handed to the store's
- * `tapCell` state machine, so there is no component per cell. Screen-reader
- * users get a grid of labelled cells instead, because a single SVG cannot be
- * explored cell by cell.
+ * `tapCell` state machine, so there is no component per cell. A long press
+ * on a gate drags it instead (`DraggableGates`). Screen-reader users get a
+ * grid of labelled cells instead, because a single SVG cannot be explored
+ * cell by cell.
  *
  * Spoken labels number qubits from 0 (matching the `q0` wire labels and
  * Qiskit) and steps from 1.
@@ -85,16 +89,6 @@ export function useScreenReaderEnabled(): boolean {
   return enabled;
 }
 
-const gateFill = (type: GateType) => GateColors[GATES[type].colorKey];
-const labelFill = (type: GateType) => (type === 'M' ? GateColors.labelOnLight : GateColors.label);
-
-/** CX/CZ draw their target as the X/Z they apply, like the read-only diagram. */
-function bodyLabel(type: GateType): string {
-  if (type === 'CX') return 'X';
-  if (type === 'CZ') return 'Z';
-  return GATES[type].symbol;
-}
-
 const qubitWord = (q: number) => `qubit ${q}`;
 
 /** One gate described for a screen reader, e.g. "CNOT, control qubit 0, target qubit 1". */
@@ -137,81 +131,6 @@ export function cellLabel(gate: EditorGate | null, qubit: number, column: number
   }
   return `${where}, crossed by ${name}`;
 }
-
-interface GateGlyphProps {
-  gate: EditorGate;
-  selected: boolean;
-  /** Selection ring color (theme accent), passed in so the glyph stays theme-free. */
-  ringColor: string;
-}
-
-/** One gate's drawing. Memoized: an edit only redraws the gates it changed. */
-export const GateGlyph = memo(function GateGlyph({ gate, selected, ringColor }: GateGlyphProps) {
-  const { type, qubit, column, control } = gate;
-  const fill = gateFill(type);
-  const target = cellCenter(qubit, column);
-  const half = GRID.GATE / 2;
-  const twoQubit = control !== undefined && isTwoQubitGate(type);
-  const other = twoQubit ? cellCenter(control, column) : null;
-  const angle = gate.params?.theta !== undefined ? formatAngle(gate.params.theta) : null;
-  const label = bodyLabel(type);
-
-  const box = (y: number, key: string) => (
-    <G key={key}>
-      <Rect x={target.x - half} y={y - half} width={GRID.GATE} height={GRID.GATE} rx={Radii.sm} fill={fill} />
-      <SvgText
-        x={target.x}
-        y={angle ? y - 2 : y + 4}
-        fontSize={label.length > 2 ? 10 : 13}
-        fontWeight="700"
-        fill={labelFill(type)}
-        textAnchor="middle">
-        {label}
-      </SvgText>
-      {angle ? (
-        <SvgText x={target.x} y={y + 12} fontSize={9} fill={labelFill(type)} textAnchor="middle">
-          {angle}
-        </SvgText>
-      ) : null}
-    </G>
-  );
-
-  const cross = (y: number, key: string) => (
-    <G key={key}>
-      <Line x1={target.x - 7} y1={y - 7} x2={target.x + 7} y2={y + 7} stroke={fill} strokeWidth={2.5} />
-      <Line x1={target.x - 7} y1={y + 7} x2={target.x + 7} y2={y - 7} stroke={fill} strokeWidth={2.5} />
-    </G>
-  );
-
-  let body: React.ReactNode;
-  if (!other) body = box(target.y, 't');
-  else if (type === 'SWAP') body = [cross(other.y, 'c'), cross(target.y, 't')];
-  else if (type === 'CX' || type === 'CZ')
-    body = [<Circle key="c" cx={other.x} cy={other.y} r={6} fill={fill} />, box(target.y, 't')];
-  else body = [box(other.y, 'c'), box(target.y, 't')];
-
-  const top = Math.min(target.y, other?.y ?? target.y);
-  const bottom = Math.max(target.y, other?.y ?? target.y);
-  return (
-    <G>
-      {other ? <Line x1={target.x} y1={top} x2={target.x} y2={bottom} stroke={fill} strokeWidth={2} /> : null}
-      {body}
-      {selected ? (
-        <Rect
-          x={target.x - half - 4}
-          y={top - half - 4}
-          width={GRID.GATE + 8}
-          height={bottom - top + GRID.GATE + 8}
-          rx={Radii.md}
-          fill="none"
-          stroke={ringColor}
-          strokeWidth={2.5}
-          testID="selection-ring"
-        />
-      ) : null}
-    </G>
-  );
-});
 
 interface ScreenReaderGridProps {
   qubitCount: number;
@@ -259,24 +178,28 @@ function ScreenReaderGrid({ qubitCount, columns, gates, selectedId }: ScreenRead
   return <>{cells}</>;
 }
 
-export interface CircuitCanvasProps {
-  /**
-   * Compose more gestures with the grid tap (e.g. drag to move). Receives the
-   * tap gesture and returns the gesture to attach; defaults to the tap alone.
-   */
-  composeGesture?: (tap: TapGesture) => ComposedGesture | GestureType;
-}
-
-export function CircuitCanvas({ composeGesture }: CircuitCanvasProps) {
+export function CircuitCanvas() {
   const theme = useTheme();
   const qubitCount = useCircuitEditorStore((s) => s.qubitCount);
   const gates = useCircuitEditorStore((s) => s.gates);
   const selectedId = useCircuitEditorStore((s) => s.selectedId);
   const pending = useCircuitEditorStore((s) => s.pendingControl);
+  const armed = useCircuitEditorStore((s) => s.armed);
   const screenReader = useScreenReaderEnabled();
 
   const tap = useCanvasTapGesture(qubitCount, !screenReader);
-  const gesture = useMemo(() => (composeGesture ? composeGesture(tap) : tap), [composeGesture, tap]);
+  // Placement mode (a gate armed) is all taps; the screen-reader cells replace both gestures.
+  const drag = useCanvasDragGesture(qubitCount, gates, !screenReader && armed === null);
+  // Exclusive: the tap only fires once the drag has failed. A touch that lifts
+  // before the 250 ms long press fails the drag, so quick taps are unchanged;
+  // a touch held still past it lifts the gate and cancels the tap, so one
+  // touch can never both tap and drag. A touch off any gate fails the drag on
+  // touch-down.
+  const gesture = useMemo(() => Gesture.Exclusive(drag.gesture, tap), [drag.gesture, tap]);
+  const dragged = drag.dragged;
+  // Core ScrollViews are outside RNGH's gesture graph, so they can't be told to
+  // wait for the pan. Lock them from JS instead while a gate is lifted.
+  const scrollEnabled = dragged === null;
 
   const { width, height, columns } = canvasSize(qubitCount, usedColumns({ qubitCount, gates }));
   const summary = useMemo(() => circuitSummary(qubitCount, gates), [qubitCount, gates]);
@@ -316,8 +239,17 @@ export function CircuitCanvas({ composeGesture }: CircuitCanvasProps) {
 
   return (
     <View style={[styles.frame, { backgroundColor: theme.elevated, borderColor: theme.border }]}>
-      <ScrollView nestedScrollEnabled style={styles.vertical} showsVerticalScrollIndicator={false}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      <ScrollView
+        nestedScrollEnabled
+        scrollEnabled={scrollEnabled}
+        style={styles.vertical}
+        showsVerticalScrollIndicator={false}
+        testID="canvas-scroll-vertical">
+        <ScrollView
+          horizontal
+          scrollEnabled={scrollEnabled}
+          showsHorizontalScrollIndicator={false}
+          testID="canvas-scroll-horizontal">
           <GestureDetector gesture={gesture}>
             <View style={{ width, height }} collapsable={false}>
               <Svg
@@ -342,10 +274,18 @@ export function CircuitCanvas({ composeGesture }: CircuitCanvasProps) {
                     testID="pending-control"
                   />
                 ) : null}
+                {drag.hover ? <DropHighlight hover={drag.hover} /> : null}
                 {gates.map((g) => (
-                  <GateGlyph key={g.id} gate={g} selected={g.id === selectedId} ringColor={theme.primary} />
+                  <GateGlyph
+                    key={g.id}
+                    gate={g}
+                    selected={g.id === selectedId}
+                    ringColor={theme.primary}
+                    dimmed={g.id === dragged?.id}
+                  />
                 ))}
               </Svg>
+              {dragged ? <LiftedGate drag={drag} gate={dragged} /> : null}
               {screenReader ? (
                 <ScreenReaderGrid qubitCount={qubitCount} columns={columns} gates={gates} selectedId={selectedId} />
               ) : null}
