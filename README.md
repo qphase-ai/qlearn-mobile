@@ -13,7 +13,8 @@ Mobile (Expo) ─┘   (Q-Learn repo)   └─ Quantum execution (Vercel Sandbox
 The backend, database, auth, curriculum, AI tutor and quantum execution all live in [`qphase-ai/Q-Learn`](https://github.com/qphase-ai/Q-Learn). This repo contains only the mobile client. It talks to the same FastAPI API and the same Supabase project as the web app, so **one account works on both**.
 
 - Architecture audit and roadmap: [`docs/architecture-audit.md`](docs/architecture-audit.md)
-- Current plan: [`docs/superpowers/plans/2026-10-03-phase-1-foundation.md`](docs/superpowers/plans/2026-10-03-phase-1-foundation.md)
+- Current plan: [`docs/superpowers/plans/2026-10-04-phase-6-polish-release.md`](docs/superpowers/plans/2026-10-04-phase-6-polish-release.md)
+- Release checklist: [`docs/release.md`](docs/release.md)
 
 ## Status
 
@@ -24,11 +25,13 @@ The backend, database, auth, curriculum, AI tutor and quantum execution all live
 
 - **Phase 5 (Build)**: a touch-first circuit editor. You can tap to place gates, long-press and drag to move them, edit angles, undo and redo, use example templates, run on the Q-Learn quantum backend, ask the tutor about the circuit, and open lesson circuits in the builder. It sends the same canonical `CircuitSpec` as the web.
 
-Phase 6 (offline, notifications, deep links, release) is next. See the roadmap in the audit (§18).
+- **Phase 6 (Polish)**, done: lessons you've opened stay readable offline, and a lesson completed offline is queued and shown as "waiting to sync" until the server saves it. `qlearn://` deep links open the right screen, even after signing in first. There is an opt-in daily study reminder (local notification). Release readiness: OTA updates with `expo-updates`, store submit config, permissions and the iOS privacy manifest.
+
+Next: Phase 3 (graded practice) when the Q-Learn quiz API lands, and the other backend items in the audit (§13): remote push, saved circuits, universal links. See the roadmap in the audit (§18).
 
 ## Tech stack
 
-Expo SDK 57 · React Native 0.86 · React 19 · TypeScript · Expo Router · TanStack Query (server state) · Zustand (client state) · Supabase JS (Auth + Realtime) · Expo SecureStore · expo-sqlite · Reanimated · Gesture Handler · Jest + React Native Testing Library
+Expo SDK 57 · React Native 0.86 · React 19 · TypeScript · Expo Router · TanStack Query (server state, persisted offline cache) · Zustand (client state) · Supabase JS (Auth + Realtime) · Expo SecureStore · expo-sqlite · expo-network · expo-notifications (local only) · expo-updates · Reanimated · Gesture Handler · Jest + React Native Testing Library
 
 ## Getting started
 
@@ -40,7 +43,7 @@ cp .env.example .env.local     # then fill in the values (see below)
 npm start                      # scan the QR code with Expo Go, or press i / a
 ```
 
-Phase 1 runs in **Expo Go**. Later phases that add native modules will need a development build (`npx eas-cli@latest build --profile development`).
+The app adds no custom native code, so it should run in **Expo Go**. Local study reminders are expected to work there too, but that hasn't been checked on a device yet. Over-the-air updates are off in Expo Go and development. For checks that need native behaviour (notification taps from a cold start, gestures, the OAuth return on Android), use a development build (`npx eas-cli@latest build --profile development`).
 
 ### Environment variables
 
@@ -86,16 +89,21 @@ src/
     (auth)/         login, signup, forgot-password (shown when signed out)
     (tabs)/         Home, Learn, Build, AI Tutor, Profile (shown when signed in)
     reset-password  recovery deep link · auth/callback: OAuth deep link
+    +native-intent  captures incoming links for replay after sign-in
   components/ui/    design-system primitives (Button, TextField, Card, state views…)
-  features/         per-domain hooks and logic (auth, profile, …)
+  components/<domain>/  domain UI (learning, lessons, circuit, tutor, profile, …)
+  features/         per-domain hooks and logic (auth, learning, circuit, tutor, profile,
+                    linking: deep-link validation + pending href,
+                    notifications: local study reminders)
   lib/api/          typed FastAPI client + one function per endpoint
   lib/supabase/     Supabase client (SecureStore session, PKCE) and polyfills
   lib/storage/      chunked SecureStore adapter
-  lib/query/        TanStack Query client defaults
+  lib/query/        TanStack Query client, offline persistence, onlineManager wiring
   stores/           Zustand stores (client state only)
   types/contracts   backend contract types (mirrors the web/backend schemas)
   constants/theme   design tokens ported from the web design system
-docs/               architecture audit and implementation plans
+plugins/            local Expo config plugins (withoutPushEntitlement)
+docs/               architecture audit, implementation plans, release checklist
 ```
 
 Data flow: `screen → feature hook (TanStack Query) → endpoint function → apiClient → FastAPI`. Screens never call `fetch` directly.
@@ -111,10 +119,25 @@ Data flow: `screen → feature hook (TanStack Query) → endpoint function → a
 
 ## Deep links
 
-Scheme: `qlearn://`. Routes are designed to support `qlearn://lesson/<id>`, `qlearn://quiz/<id>`, `qlearn://circuit/<id>` and `qlearn://tutor` as those screens land.
+Scheme: `qlearn://`. Supported links:
+
+| Link | Opens |
+|---|---|
+| `qlearn://` | Home |
+| `qlearn://learn` · `build` · `tutor` · `profile` | That tab |
+| `qlearn://lesson/<id>` · `qlearn://level/<id>` | The lesson or level (optional `?courseId=`) |
+| `qlearn://auth/callback` · `qlearn://reset-password` | Google sign-in and password reset (Supabase redirects) |
+
+Ids are checked against the content id shapes (UUIDs, or Payload ids for the CMS source). Anything else shows a "link not supported" screen. A link opened while signed out is remembered for 15 minutes and opened once after sign-in (email, Google or a restored session). Auth callback and reset links are never stored.
+
+Not supported yet: `qlearn://circuit/<id>` (no `GET /circuits/{id}`), `qlearn://quiz/<id>` (no quiz API), and universal `https://` links (the web domain must host the association files). See the audit, §13.
 
 ## CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`) runs lint, type-check and tests, and bundles both platforms on every PR. `eas.json` defines the `development`, `preview` and `production` build profiles. No signing credentials are committed. They are managed by EAS when releases begin.
+GitHub Actions (`.github/workflows/ci.yml`) runs lint, type-check and tests, and bundles both platforms on every PR. `eas.json` defines the `development`, `preview` and `production` build profiles. No signing credentials are committed. They are managed by EAS.
+
+## Releasing
+
+Builds, store submission, OTA updates (`eas update`) and rollback are in [`docs/release.md`](docs/release.md), with the one-time account steps (`eas init`, `eas update:configure`, store credentials). Until those run, `expo-updates` is built in but disabled.
 
 > The bundle identifier / package `ai.qphase.qlearn` is a placeholder. Confirm it before the first store submission, because it can't be changed afterwards.

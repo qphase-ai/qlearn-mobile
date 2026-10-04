@@ -113,7 +113,7 @@
 - [x] Sign-out cancels all scheduled reminders and resets the preference.
 - [x] `app.json`: the `expo-notifications` plugin (icon/color from the theme). No push credentials and no `projectId` dependency for local notifications.
 - [x] Tests: schedule/cancel calls with `expo-notifications` mocked, permission denied, launch sync, and tap routing.
-- [ ] Audit §13/§14: remote push needs `POST /api/v1/devices` (Expo push token per user) plus server-side sending. This is a smallest-addition proposal and is not built. *(Written in Task 5.)*
+- [x] Audit §13/§14: remote push needs `POST /api/v1/devices` (Expo push token per user) plus server-side sending. This is a smallest-addition proposal and is not built. *(Written in Task 5.)*
 
 **Implementation notes (deviations and decisions):**
 - Only our own request is touched: it is scheduled under the fixed identifier `qlearn.study-reminder` and cancelled with `cancelScheduledNotificationAsync(id)`, never `cancelAll`. Scheduling with the same identifier replaces the request on both platforms, so there is no cancel before scheduling and launch sync can simply reschedule. Every schedule recreates the channel first, in case it was deleted in system Settings. Trigger: `{ type: SchedulableTriggerInputTypes.DAILY, channelId: 'study-reminders', hour, minute }` (`DailyTriggerInput` in expo-notifications 57 `build/Notifications.types.d.ts`).
@@ -170,6 +170,15 @@
 - CI unchanged: it already bundles iOS and Android with placeholder env.
 
 ### Task 5: Docs and verification
-- [ ] Audit: §13, §14, §16, §18 and §19 updated with Phase 6 status and the remaining backend gaps (push devices, `GET /circuits/{id}`, quiz API, universal-link files on the web).
-- [ ] README status, AGENTS (offline and notification invariants), and this plan's boxes ticked.
-- [ ] lint, type-check, tests, iOS + Android export, and screenshots of the offline banner, pending-sync and the reminder card.
+- [x] Audit: §13, §14, §16, §18 and §19 updated with Phase 6 status and the remaining backend gaps (push devices, `GET /circuits/{id}`, quiz API, universal-link files on the web).
+- [x] README status, AGENTS (offline and notification invariants), and this plan's boxes ticked.
+- [x] lint, type-check, tests, iOS + Android export.
+- [x] Screenshots of the offline banner, pending-sync and the reminder card (react-native-web harness, mocked API).
+
+**Implementation notes:**
+- Added the Learn screen test the Task 4 reviewer recommended (`src/components/learning/__tests__/LearnScreen.test.tsx`, outside `src/app` so it isn't a route). It runs the real screen and hooks with mocked endpoints: the same search `TextInput` instance survives the switch to hits and back to level cards, and a completion queued offline through the app's mutation defaults marks the search hit "waiting to sync".
+- README Releasing section and Deep links table; AGENTS invariants for offline, links, notifications and release.
+
+## Phase 6 outcome
+
+Content a student has opened stays readable offline, per account. Lesson completion made offline is queued, labelled "waiting to sync" and sent on reconnect. `qlearn://` links to lessons, levels and tabs are validated and survive sign-in. There is an opt-in local daily reminder. The app has OTA updates (disabled until `eas update:configure`), a submit skeleton, a permission and privacy-manifest review and a release checklist (`docs/release.md`). Verified by lint, type-check, 484 Jest tests (63 suites) and an iOS + Android `expo export`. What still needs a real device is in audit §19 (items 11 and 12). What waits on other repos is in §13: remote push, `GET /circuits/{id}`, the quiz API and the universal-link files on the web.
