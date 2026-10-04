@@ -10,6 +10,7 @@ import { validateCircuit } from '@/features/circuit/editor/validate';
 import { CircuitRunError, useCircuitRun } from '@/features/circuit/useCircuitRun';
 import { useTheme } from '@/hooks/use-theme';
 import { toUserMessage } from '@/lib/api/errors';
+import { useIsOnline } from '@/lib/query/online';
 import { SHOT_OPTIONS, useCircuitEditorStore } from '@/stores/circuit-editor-store';
 
 type ResultView = 'probabilities' | 'statevector';
@@ -64,6 +65,7 @@ export function RunPanel() {
   const shots = useCircuitEditorStore((s) => s.shots);
   const setShots = useCircuitEditorStore((s) => s.setShots);
   const { state, run } = useCircuitRun();
+  const online = useIsOnline();
   const [view, setView] = useState<ResultView>('probabilities');
   /** The spec the shown result was computed for, to flag results of an older circuit. */
   const [ranKey, setRanKey] = useState<string | null>(null);
@@ -88,10 +90,14 @@ export function RunPanel() {
       <Button
         label={state.status === 'done' ? 'Run again' : 'Run circuit'}
         loading={running}
-        disabled={blocked}
+        disabled={blocked || !online}
         onPress={onRun}
       />
-      {empty ? (
+      {!online ? (
+        <Text variant="caption" color="muted" testID="run-blocker">
+          You&apos;re offline. Runs need the Q-Learn simulator.
+        </Text>
+      ) : empty ? (
         <Text variant="caption" color="muted" testID="run-blocker">
           Add a gate to run your circuit.
         </Text>

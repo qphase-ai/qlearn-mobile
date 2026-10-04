@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ProgressBar, Text } from '@/components/ui';
 import { Radii, Spacing } from '@/constants/theme';
+import { completionCaption } from '@/features/learning/curriculum';
 import { useTheme } from '@/hooks/use-theme';
 
 export function LevelCard({
@@ -10,6 +11,7 @@ export function LevelCard({
   title,
   done,
   total,
+  pending = 0,
   locked,
   onPress,
 }: {
@@ -17,16 +19,19 @@ export function LevelCard({
   title: string;
   done: number;
   total: number;
+  /** Completions counted in `done` that are still waiting to sync. */
+  pending?: number;
   locked: boolean;
   onPress: () => void;
 }) {
   const theme = useTheme();
   const complete = total > 0 && done >= total;
+  const caption = completionCaption(done, total, pending);
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ disabled: locked }}
-      accessibilityLabel={`${label}: ${title}. ${done} of ${total} lessons complete${locked ? '. Locked' : ''}`}
+      accessibilityLabel={`${label}: ${title}. ${caption}${locked ? '. Locked' : ''}`}
       accessibilityHint={locked ? 'Complete the previous level to unlock' : undefined}
       disabled={locked}
       onPress={onPress}
@@ -39,15 +44,15 @@ export function LevelCard({
           {label.toUpperCase()}
         </Text>
         <Ionicons
-          name={locked ? 'lock-closed' : complete ? 'checkmark-circle' : 'chevron-forward'}
+          name={locked ? 'lock-closed' : complete ? (pending ? 'time-outline' : 'checkmark-circle') : 'chevron-forward'}
           size={18}
-          color={complete ? theme.success : theme.muted}
+          color={complete && !pending ? theme.success : theme.muted}
         />
       </View>
       <Text variant="heading">{title}</Text>
       <ProgressBar value={total ? done / total : 0} label={`${label} progress`} />
       <Text variant="caption" color="muted">
-        {locked ? 'Complete the previous level to unlock' : `${done} of ${total} lessons complete`}
+        {locked ? 'Complete the previous level to unlock' : caption}
       </Text>
     </Pressable>
   );

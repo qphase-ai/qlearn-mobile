@@ -49,13 +49,18 @@ export function Screen({
   );
 }
 
+/**
+ * Content container for a screen that is a `FlatList` (server lists). Same
+ * frame as `Screen`, without the `gap`, which would space every row.
+ */
+export const listContentStyle: ViewStyle = {
+  padding: Spacing.lg,
+  width: '100%',
+  maxWidth: MAX_CONTENT_WIDTH,
+  alignSelf: 'center',
+};
+
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  content: {
-    padding: Spacing.lg,
-    gap: Spacing.lg,
-    width: '100%',
-    maxWidth: MAX_CONTENT_WIDTH,
-    alignSelf: 'center',
-  },
+  content: { ...listContentStyle, gap: Spacing.lg },
 });

@@ -38,6 +38,10 @@ Run lint, type-check and tests before declaring any task done.
 | Realtime: Supabase broadcast with the backend's channel names. Subscribe before POST. No polling | No replay on broadcast channels |
 | Never hardcode correct answers or fake backend success | Integrity of the learner model |
 | Colors from `constants/theme.ts` via `useTheme()` | Light/dark consistency with web tokens |
+| Offline: only the allowlisted learning queries persist (`lib/query/persist.ts`), stamped with the owner and wiped on sign-out. The only queued write is lesson completion, shown as "waiting to sync", never as saved. Online-only actions are disabled offline | No cross-account data, no fake success |
+| Every incoming link goes through `features/linking` (validated, `protectedHref`). Never store auth callback or reset links | Links are untrusted input |
+| Notifications are local only. Reminder operations go through `features/notifications/reminders` (serialized). No push token | No push backend yet (audit §13) |
+| Release: runtime version is `fingerprint`. Bump `CACHE_SCHEMA` when a persisted query shape changes. Adding a native dep: update `ios.privacyManifests` and `android.blockedPermissions`. Keep `plugins/withoutPushEntitlement` until remote push exists | OTA and store safety (`docs/release.md`) |
 
 ## Layout
 

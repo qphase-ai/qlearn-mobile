@@ -21,6 +21,7 @@ export function LessonRow({
   subtitle,
   type,
   completed,
+  pendingSync,
   onPress,
 }: {
   number?: string;
@@ -28,19 +29,22 @@ export function LessonRow({
   subtitle?: string | null;
   type: LessonType | (string & {});
   completed?: boolean;
+  /** Completed on this device, not yet saved by the server. Wins over `completed`. */
+  pendingSync?: boolean;
   onPress: () => void;
 }) {
   const theme = useTheme();
+  const status = pendingSync ? ', completed, waiting to sync' : completed ? ', completed' : '';
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${number ? `Lesson ${number}, ` : ''}${title}${completed ? ', completed' : ''}`}
+      accessibilityLabel={`${number ? `Lesson ${number}, ` : ''}${title}${status}`}
       onPress={onPress}
       style={({ pressed }) => [styles.row, { borderColor: theme.border, opacity: pressed ? 0.7 : 1 }]}>
       <Ionicons
-        name={completed ? 'checkmark-circle' : TYPE_ICON[type] ?? 'document-text-outline'}
+        name={pendingSync ? 'time-outline' : completed ? 'checkmark-circle' : TYPE_ICON[type] ?? 'document-text-outline'}
         size={22}
-        color={completed ? theme.success : theme.muted}
+        color={completed && !pendingSync ? theme.success : theme.muted}
       />
       <View style={styles.body}>
         <Text variant="label" numberOfLines={2}>
@@ -50,6 +54,11 @@ export function LessonRow({
         {subtitle ? (
           <Text variant="caption" color="muted" numberOfLines={2}>
             {subtitle}
+          </Text>
+        ) : null}
+        {pendingSync ? (
+          <Text variant="caption" color="muted">
+            Waiting to sync
           </Text>
         ) : null}
       </View>

@@ -35,6 +35,9 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": { "ascAppId": "REPLACE_WITH_ASC_APP_ID" },
+      "android": { "track": "internal", "releaseStatus": "draft" }
+    }
   }
 }

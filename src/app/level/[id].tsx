@@ -1,30 +1,41 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { StyleSheet, View } from 'react-native';
+import { FlatList, StyleSheet } from 'react-native';
 
 import { LessonRow } from '@/components/learning/LessonRow';
-import { Card, EmptyState, ErrorState, LoadingState, ProgressBar, Screen, Text } from '@/components/ui';
+import { LinkNotSupported } from '@/components/LinkNotSupported';
+import { Card, EmptyState, ErrorState, listContentStyle, LoadingState, ProgressBar, Screen, Text } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 import {
+  completionCaption,
   isLessonCompleted,
   lessonNumber,
   levelLabel,
   moduleCompletion,
+  pendingCount,
   sortedLessons,
   sortedModules,
 } from '@/features/learning/curriculum';
-import { useActiveCourse, useCourse, useProgress } from '@/features/learning/hooks';
+import { useActiveCourse, useCourse, usePendingLessonCompletions, useProgress } from '@/features/learning/hooks';
+import { isValidContentId } from '@/features/linking/links';
+import { useTheme } from '@/hooks/use-theme';
+import { isWaitingForNetwork, OFFLINE_ERROR } from '@/lib/query/online';
 
 export default function LevelScreen() {
+  const theme = useTheme();
   const { id, courseId } = useLocalSearchParams<{ id: string; courseId?: string }>();
+  // Params can come from a deep link: never fetch with a malformed id.
+  const validLink = isValidContentId(id) && (courseId === undefined || isValidContentId(courseId));
   const active = useActiveCourse();
-  const course = useCourse(courseId ?? active.activeId);
+  const course = useCourse(validLink ? (courseId ?? active.activeId) : null);
   const { progress } = useProgress();
+  const pending = usePendingLessonCompletions();
 
-  if (course.isPending) return <LoadingState />;
-  if (course.isError) {
+  if (!validLink) return <LinkNotSupported />;
+  if (course.isPending && !isWaitingForNetwork(course)) return <LoadingState />;
+  if (course.isPending || course.isError) {
     return (
       <Screen edges={[]}>
-        <ErrorState error={course.error} onRetry={() => void course.refetch()} />
+        <ErrorState error={course.error ?? OFFLINE_ERROR} onRetry={() => void course.refetch()} />
       </Screen>
     );
   }
@@ -44,38 +55,46 @@ export default function LevelScreen() {
   const lessons = sortedLessons(mod);
 
   return (
-    <Screen edges={[]}>
-      <Stack.Screen options={{ title: levelLabel(index) }} />
-      <Card>
-        <Text variant="caption" color="primary" style={styles.label}>
-          {levelLabel(index).toUpperCase()}
-        </Text>
-        <Text variant="title">{mod.title}</Text>
-        <ProgressBar value={total ? done / total : 0} label="Level progress" />
-        <Text variant="caption" color="muted">
-          {done} of {total} lessons complete
-        </Text>
-      </Card>
-      {lessons.length === 0 ? (
-        <EmptyState icon="document-outline" title="No lessons yet" />
-      ) : (
-        <View>
-          {lessons.map((lesson, i) => (
-            <LessonRow
-              key={lesson.id}
-              number={lessonNumber(index, i)}
-              title={lesson.title}
-              type={lesson.lesson_type}
-              completed={isLessonCompleted(progress, lesson.id)}
-              onPress={() =>
-                router.push({ pathname: '/lesson/[id]', params: { id: lesson.id, courseId: course.data.id } })
-              }
-            />
-          ))}
-        </View>
+    <FlatList
+      style={{ backgroundColor: theme.background }}
+      contentContainerStyle={listContentStyle}
+      contentInsetAdjustmentBehavior="automatic"
+      data={lessons}
+      keyExtractor={(lesson) => lesson.id}
+      // Rows read these outside `data`: re-render them when they change.
+      extraData={[progress, pending]}
+      ListHeaderComponentStyle={styles.header}
+      ListHeaderComponent={
+        <>
+          <Stack.Screen options={{ title: levelLabel(index) }} />
+          <Card>
+            <Text variant="caption" color="primary" style={styles.label}>
+              {levelLabel(index).toUpperCase()}
+            </Text>
+            <Text variant="title">{mod.title}</Text>
+            <ProgressBar value={total ? done / total : 0} label="Level progress" />
+            <Text variant="caption" color="muted">
+              {completionCaption(done, total, pendingCount(mod.lessons, pending))}
+            </Text>
+          </Card>
+        </>
+      }
+      ListEmptyComponent={<EmptyState icon="document-outline" title="No lessons yet" />}
+      renderItem={({ item: lesson, index: i }) => (
+        <LessonRow
+          number={lessonNumber(index, i)}
+          title={lesson.title}
+          type={lesson.lesson_type}
+          completed={isLessonCompleted(progress, lesson.id)}
+          pendingSync={pending.has(lesson.id)}
+          onPress={() => router.push({ pathname: '/lesson/[id]', params: { id: lesson.id, courseId: course.data.id } })}
+        />
       )}
-    </Screen>
+    />
   );
 }
 
-const styles = StyleSheet.create({ label: { letterSpacing: 1, fontWeight: '700', marginBottom: Spacing.xxs } });
+const styles = StyleSheet.create({
+  header: { marginBottom: Spacing.lg },
+  label: { letterSpacing: 1, fontWeight: '700', marginBottom: Spacing.xxs },
+});

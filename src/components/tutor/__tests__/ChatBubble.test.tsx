@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import * as WebBrowser from 'expo-web-browser';
 
-import { AssistantBubble } from '../ChatBubble';
+import { AssistantBubble, ErrorBubble } from '../ChatBubble';
 
 jest.mock('expo-web-browser', () => ({ openBrowserAsync: jest.fn() }));
 jest.mock('@/components/lessons/markdown/MathMarkdown', () => {
@@ -34,5 +34,15 @@ describe('AssistantBubble', () => {
     await fireEvent.press(screen.getByText('[1] Qiskit docs ↗'));
     expect(WebBrowser.openBrowserAsync).toHaveBeenCalledWith('https://qiskit.org');
     expect(screen.getByText('[2] Lesson 1.1')).toBeTruthy();
+  });
+});
+
+describe('ErrorBubble', () => {
+  it('can hold Try again while offline', async () => {
+    const onRetry = jest.fn();
+    await render(<ErrorBubble message="The AI Tutor is unavailable." onRetry={onRetry} retryDisabled />);
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeDisabled();
+    await fireEvent.press(screen.getByRole('button', { name: 'Try again' }));
+    expect(onRetry).not.toHaveBeenCalled();
   });
 });

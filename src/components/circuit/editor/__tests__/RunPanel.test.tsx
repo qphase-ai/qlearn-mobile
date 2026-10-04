@@ -1,3 +1,4 @@
+import { onlineManager } from '@tanstack/react-query';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 
 import { validateCircuit } from '@/features/circuit/editor/validate';
@@ -31,6 +32,8 @@ beforeEach(async () => {
   withState({ status: 'idle' });
 });
 
+afterEach(() => onlineManager.setOnline(true));
+
 const runButton = () => screen.getByRole('button', { name: /Run (circuit|again)/ });
 
 describe('RunPanel', () => {
@@ -50,6 +53,17 @@ describe('RunPanel', () => {
     const [first] = validateCircuit(editor().spec());
     expect(first).toBeTruthy();
     expect(screen.getByTestId('run-blocker')).toHaveTextContent(first);
+  });
+
+  it('disables Run offline and says why', async () => {
+    bell();
+    await render(<RunPanel />);
+    expect(runButton()).toBeEnabled();
+    await act(async () => onlineManager.setOnline(false));
+    expect(runButton()).toBeDisabled();
+    expect(screen.getByTestId('run-blocker')).toHaveTextContent("You're offline. Runs need the Q-Learn simulator.");
+    await fireEvent.press(runButton());
+    expect(run).not.toHaveBeenCalled();
   });
 
   it('is busy while a run is in flight', async () => {

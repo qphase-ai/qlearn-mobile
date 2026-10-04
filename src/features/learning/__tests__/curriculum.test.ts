@@ -1,5 +1,7 @@
 import {
+  completionCaption,
   courseCompletion,
+  courseLessons,
   isModuleLocked,
   isTrackableLessonId,
   lessonNumber,
@@ -7,6 +9,7 @@ import {
   locateLesson,
   moduleCompletion,
   nextLesson,
+  pendingCount,
   progressMap,
   searchCourseTitles,
   sortedLessons,
@@ -84,5 +87,14 @@ describe('searchCourseTitles', () => {
     expect(hits.map((h) => h.lesson_id)).toEqual(['l3']);
     expect(hits[0]).toMatchObject({ module_title: 'Gates', course_id: 'c1', snippet: null });
     expect(searchCourseTitles(course, '  ')).toEqual([]);
+  });
+});
+
+describe('pending sync counts', () => {
+  it('counts queued completions in a course and flags them in the caption', () => {
+    const pending = new Set(['l2', 'l4', 'elsewhere']);
+    expect(pendingCount(courseLessons(course), pending)).toBe(2);
+    expect(completionCaption(3, 4, 2)).toBe('3 of 4 lessons complete · 2 waiting to sync');
+    expect(completionCaption(3, 4)).toBe('3 of 4 lessons complete');
   });
 });

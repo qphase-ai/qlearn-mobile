@@ -1,13 +1,16 @@
 import { useMutation } from '@tanstack/react-query';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { ReminderCard } from '@/components/profile/ReminderCard';
 import { ScreenTitle } from '@/components/ScreenTitle';
 import { Banner, Button, Card, ErrorState, LoadingState, Screen, Text } from '@/components/ui';
 import { MIN_TOUCH, Radii, Spacing } from '@/constants/theme';
 import { signOut } from '@/features/auth/auth-api';
 import { authErrorMessage } from '@/features/auth/errors';
-import { useMe } from '@/features/profile/hooks';
+import { getBuildInfo } from '@/features/profile/build-info';
+import { ACCOUNT_OFFLINE, useMe } from '@/features/profile/hooks';
 import { useTheme } from '@/hooks/use-theme';
+import { isWaitingForNetwork } from '@/lib/query/online';
 import { usePreferencesStore, type ThemePreference } from '@/stores/preferences-store';
 
 const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
@@ -21,6 +24,9 @@ const ROLE_LABEL: Record<string, string> = {
   instructor: 'Instructor',
   admin: 'Admin',
 };
+
+// Fixed for the life of the process: a downloaded update applies on the next launch.
+const BUILD = getBuildInfo();
 
 export default function ProfileScreen() {
   const theme = useTheme();
@@ -36,7 +42,7 @@ export default function ProfileScreen() {
       <Card>
         <Text variant="heading">Account</Text>
         {me.isPending ? (
-          <LoadingState />
+          isWaitingForNetwork(me) ? <Text color="muted">{ACCOUNT_OFFLINE}</Text> : <LoadingState />
         ) : me.isError ? (
           <ErrorState error={me.error} onRetry={() => void me.refetch()} retrying={me.isRefetching} />
         ) : (
@@ -69,6 +75,17 @@ export default function ProfileScreen() {
               </Pressable>
             );
           })}
+        </View>
+      </Card>
+
+      <ReminderCard />
+
+      <Card>
+        <Text variant="heading">About</Text>
+        <View style={styles.rows}>
+          <Row label="Version" value={BUILD.version} />
+          <Row label="Channel" value={BUILD.channel} />
+          <Row label="Update" value={BUILD.update} />
         </View>
       </Card>
 

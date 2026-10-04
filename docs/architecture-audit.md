@@ -1,6 +1,6 @@
 # Q-Learn Mobile — Architecture Audit
 
-**Date:** 2026-10-03
+**Date:** 2026-10-03 (status updated through Phase 6 on 2026-10-04)
 **Audited:** `qphase-ai/Q-Learn` @ `21dcca0` (backend, frontend, cms, docs)
 **Status:** Accepted as the basis for Phase 1. Re-audit before each later phase, because the backend surface is still growing.
 
@@ -123,12 +123,13 @@ Each item is the *smallest compatible addition*. None is needed for Phase 1. Eac
 |---|---|---|
 | 2 | CMS content outside the web app | **None for now.** Mobile reads `{EXPO_PUBLIC_CONTENT_URL}/api/cms/*`. Later: move the mapping to a shared package or FastAPI if the web stops being a good BFF |
 | 2 | "What next" / recommendations | `GET /api/v1/learning/next` derived on the server (reuses the progress logic). Until then, mobile derives from progress exactly as the web does, labelled as derived |
-| 3 | Quizzes without client-side answers | `GET /lessons/{id}/quiz` (questions without answers) + `POST /quiz/attempts` → `{is_correct, explanation, mastery_delta}` using the existing tables + BKT |
+| 3 | Quizzes without client-side answers | `GET /lessons/{id}/quiz` (questions without answers) + `POST /quiz/attempts` → `{is_correct, explanation, mastery_delta}` using the existing tables + BKT. Also blocks the `qlearn://quiz/<id>` deep link |
 | 3 | Mastery | `GET /api/v1/skills/mastery` over `skill_mastery` |
 | 4 | Conversation list | `GET /api/v1/tutor/sessions` (id, first message, updated_at), paginated |
 | 4/5 | Missed broadcasts while the app is backgrounded | `GET /api/v1/circuits/executions/{id}`. The tutor already has `GET /tutor/sessions/{id}`. Used **only** for reconnect recovery, never polling |
-| 5 | Saved circuits | `GET /api/v1/circuits` (+ `GET /{id}`) over the existing `circuits` table |
-| 6 | Push | `POST /api/v1/devices` (Expo push token) + server-side sender on real events |
+| 5 | Saved circuits | `GET /api/v1/circuits` (+ `GET /{id}`) over the existing `circuits` table. `GET /circuits/{id}` also unblocks the `qlearn://circuit/<id>` deep link (now "link not supported") |
+| 6 | Remote push | `POST /api/v1/devices` storing an Expo push token per user (and a delete on sign-out) + server-side sending through the Expo push service on real events. Until then the app schedules **local** reminders only and requests no push token. When it lands: remove `plugins/withoutPushEntitlement.js` (it strips iOS `aps-environment`), see `docs/release.md` |
+| 6 | Universal links (`https://…` opening the app) | Cross-repo, no API: the Q-Learn **web frontend** serves `/.well-known/apple-app-site-association` and `/.well-known/assetlinks.json`, and the app adds `ios.associatedDomains` + Android `intentFilters` with `autoVerify`. Until then only `qlearn://` links work |
 | — | Profile editing | `PATCH /api/v1/users/me/profile` over `user_profiles` |
 
 ## 14. Recommended mobile architecture
@@ -143,9 +144,18 @@ Screen (src/app, Expo Router)
         → FastAPI
 Realtime: src/lib/realtime/*  subscribe-before-POST helpers, same channel names as the web
 Auth:     src/features/auth   AuthProvider (supabase session) + Stack.Protected guards
-Client state: src/stores      Zustand: preferences (theme). Later: circuit editor, tutor draft
-Persistence: SecureStore (session, chunked) · expo-sqlite kv-store (prefs, later query cache)
+Client state: src/stores      Zustand: preferences (theme, course, reminder), circuit editor, tutor
+Persistence: SecureStore (session, chunked) · expo-sqlite kv-store (prefs, editor draft,
+             tutor conversation index, pending href, persisted query cache)
 ```
+
+Phase 6 additions:
+
+- **Offline cache** (`src/lib/query/persist.ts`): the TanStack cache persists to kv for 7 days, but only the learning allowlist (courses, course, lesson, progress). Profile, tutor and search stay in memory. Each save is stamped with the owner's user id and restored only for that user. Sign-out, an account switch or a signed-out launch wipe it. The only persisted mutation is a paused lesson completion, which resumes through `setMutationDefaults` and shows as "waiting to sync", never as saved.
+- **Connectivity** (`src/lib/query/online.ts`): `expo-network` feeds `onlineManager`. An offline banner shows while signed in. Runs and tutor sends are disabled offline, and uncached screens show an offline error instead of a spinner.
+- **Deep links** (`src/features/linking`): `src/app/+native-intent.ts` sees every system link before routing. Links are validated against the content id shapes (`links.ts`). A protected link opened while signed out is kept as a pending href (memory + kv, 15 min) and replayed once after sign-in. Auth callback and reset links are never stored.
+- **Local reminders** (`src/features/notifications`): an opt-in daily `expo-notifications` trigger under a fixed id, serialized operations, launch/foreground sync with the OS, taps routed through `openAppLink`. No push token.
+- **OTA updates:** `expo-updates` with a fingerprint runtime version, disabled until `eas update:configure` (`docs/release.md`).
 
 Principles: the backend is the source of truth, and there is no learner model on the device. No LLM, Qiskit or privileged Supabase access in the client. Server state lives only in TanStack Query.
 
@@ -161,7 +171,8 @@ src/
     (tabs)/               index (Home), learn, build, tutor, profile
     reset-password.tsx    recovery deep link
     auth/callback.tsx     OAuth deep-link landing
-    lesson/[id] module/[id] level/[id] quiz/[id] circuit/[id]   (Phase 2+)
+    lesson/[id] level/[id] tutor/history   (no module, quiz or circuit routes: §13, §18)
+    +native-intent.ts     system-link capture for the pending href (Phase 6)
   components/ui/          design-system primitives
   components/<domain>/    domain UI (home, learning, quiz, circuit, tutor, profile)
   features/<domain>/      hooks, query keys, domain logic per feature
@@ -170,7 +181,8 @@ src/
   lib/storage/            secure storage adapter, kv
   lib/realtime/           channel helpers
   stores/  hooks/  types/  constants/  utils/
-docs/                     audit, plans, decisions
+docs/                     audit, plans, decisions, release checklist
+plugins/                  local config plugins (withoutPushEntitlement)
 ```
 
 ## 16. Dependency list (SDK 57, versions resolved by `expo install`)
@@ -183,13 +195,17 @@ docs/                     audit, plans, decisions
 | expo-secure-store | Session at rest (Keychain/Keystore) |
 | expo-crypto | WebCrypto polyfill (`getRandomValues`, SHA-256) so Supabase PKCE uses S256, not `plain` |
 | expo-web-browser, expo-linking | OAuth in the system browser, deep links |
-| expo-sqlite | kv-store for preferences now. Offline cache in Phase 6 |
+| expo-sqlite | kv-store: preferences, editor draft, tutor conversation index, pending href and the persisted query cache |
 | @tanstack/react-query | Server state |
+| @tanstack/react-query-persist-client, @tanstack/query-async-storage-persister | Persisted offline cache over kv (allowlisted queries + paused lesson completions) |
+| expo-network | Connectivity for `onlineManager` |
+| expo-notifications | Local daily study reminder (no push) |
+| expo-updates | OTA updates (fingerprint runtime version) and the Profile → About build info |
 | zustand | Client state |
 | @expo/vector-icons | Tab and UI icons |
 | jest-expo, @testing-library/react-native | Tests |
 
-Deferred until their phase: `react-native-svg` (5), `expo-notifications` (6), a markdown or math renderer (2, chosen when the lesson renderer is built).
+Deferred until their phase: `react-native-svg` (5), a markdown or math renderer (2, chosen when the lesson renderer is built). Both have since landed.
 
 ## 17. Environment variables
 
@@ -211,7 +227,7 @@ Everything else (LLM keys, service key, DB URL, Vercel token, CMS secrets) stays
 4. **Tutor**, delivered before Phase 3, which is blocked on the quiz API: streamed chat on `/tutor/chat` + Realtime, **one session per conversation** (server history gives context), a device-local conversation index (no list endpoint yet), lesson and circuit context (`circuit_context` = Qiskit source), and recovery from missed `complete` events via `GET /tutor/sessions/{id}`. *(Plan: `docs/superpowers/plans/2026-10-03-phase-4-tutor.md`)*
 3. **Practice:** quiz UI on the backend quiz API (blocked on §13). Until then, CMS inline quiz blocks render as an **ungraded self-check**, exactly as on the web. Their answers are already in the public CMS payload, and nothing is written to the learner model.
 5. **Build**, done: a touch-first circuit editor in the Build tab. Its own grid model ports the web `circuitStore` placement rules. The serializer is a key-for-key port of the web's `nodesToCircuitSpec`, so both clients send the backend the same canonical `CircuitSpec`. Interaction is tap-to-place (two taps for two-qubit gates), long-press drag to move (Reanimated, UI thread), an inspector (angles, swap, move, delete), undo/redo, and a draft autosaved to kv. Runs reuse `/execute` + Realtime, and the circuit can be sent to the tutor as context. "Open in Build" works from lesson circuits. Built task by task with an implementer subagent and an independent reviewer subagent per task. *(Plan: `docs/superpowers/plans/2026-10-03-phase-5-circuit-builder.md`)* There is no saved-circuits API, so only the current draft persists, and undo history is per session (§13: `GET /circuits`).
-6. **Polish:** offline cache (SQLite query persistence), notifications, deep links, performance, EAS release.
+6. **Polish**, done: an offline cache (allowlisted learning queries persisted to kv, per account, wiped on sign-out), connectivity through `expo-network` with an offline banner and online-only actions disabled, and lesson completion queued offline and shown as "waiting to sync" until the server saves it. Deep links (`qlearn://lesson|level/<id>`, the tabs, home) are validated and survive sign-in through a pending href. There is an opt-in local daily study reminder. Release readiness: `expo-updates` (fingerprint runtime), a `submit` skeleton, blocked unused Android permissions, an iOS privacy manifest, the push entitlement stripped, FlatList for the long lists, and `docs/release.md`. Built task by task with an implementer and a reviewer subagent. *(Plan: `docs/superpowers/plans/2026-10-04-phase-6-polish-release.md`)* Not built, waiting on §13: remote push, `qlearn://circuit|quiz/<id>`, universal links.
 
 ## 19. Risks and architectural concerns
 
@@ -225,6 +241,11 @@ Everything else (LLM keys, service key, DB URL, Vercel token, CMS secrets) stays
 8. **Supabase redirect allow-list.** OAuth and reset deep links fail until the redirect URLs are added in the dashboard.
 9. **No server-side learner model API yet.** Home recommendations, mastery and streaks can't be truthful until §13 lands. Mobile will show only data the backend has, and won't invent gamification.
 10. **Rate limiting.** slowapi appears in the docs, but no middleware is installed in `main.py`. The client still handles `429` gracefully.
+11. **Verified only in Jest and config introspection, not on a device (Phase 6).** The offline banner's insets above screens with native headers, the Android Google OAuth callback's `back()` path, and notification taps on a cold start. Check them on real iOS and Android builds before release.
+12. **Known limits (Phase 6).**
+    - A student can lower or turn off the `study-reminders` channel in Android settings while permission stays granted. The reminder card doesn't detect it.
+    - If SecureStore can't be read at launch, the previous owner is unknown. A different account signing in then keeps the previous account's reminder (the query cache is still protected by its owner stamp).
+    - The preferences hydration wait is capped at 2 s. A kv read that succeeds later could overwrite a reminder change made in that window. The sign-out cancel doesn't depend on it.
 
 ## 20. Exact first milestone
 

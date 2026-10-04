@@ -19,6 +19,7 @@ import { suggestedPrompts } from '@/features/tutor/prompts';
 import { TutorError, useTutorChat } from '@/features/tutor/useTutorChat';
 import { useTheme } from '@/hooks/use-theme';
 import { toUserMessage } from '@/lib/api/errors';
+import { isWaitingForNetwork, OFFLINE_ERROR, useIsOnline } from '@/lib/query/online';
 import { useTutorStore } from '@/stores/tutor-store';
 import type { Citation } from '@/types/contracts';
 
@@ -36,6 +37,7 @@ export default function TutorScreen() {
   const setContext = useTutorStore((s) => s.setContext);
   const startNewConversation = useTutorStore((s) => s.startNewConversation);
   const [draft, setDraft] = useState('');
+  const online = useIsOnline();
   const listRef = useRef<FlatList<Item>>(null);
 
   const items = useMemo<Item[]>(() => {
@@ -58,23 +60,25 @@ export default function TutorScreen() {
 
   const submit = useCallback(
     (text: string) => {
-      if (!text.trim() || isStreaming) return;
+      if (!text.trim() || isStreaming || !online) return;
       void send(text);
       setDraft('');
     },
-    [isStreaming, send]
+    [isStreaming, online, send]
   );
 
   const renderItem = useCallback(
     ({ item }: { item: Item }) => {
       if (item.kind === 'user') return <UserBubble content={item.content} />;
-      if (item.kind === 'error') return <ErrorBubble message={item.message} onRetry={retry} />;
+      if (item.kind === 'error') return <ErrorBubble message={item.message} onRetry={retry} retryDisabled={!online} />;
       return <AssistantBubble content={item.content} citations={item.citations} streaming={item.streaming} />;
     },
-    [retry]
+    [online, retry]
   );
 
-  const loadingHistory = !!sessionId && session.isPending && !pending;
+  const sessionOffline = isWaitingForNetwork(session);
+  const loadingHistory = !!sessionId && session.isPending && !sessionOffline && !pending;
+  const cannotSend = isStreaming || !online || !draft.trim();
 
   return (
     <SafeAreaView edges={['top']} style={[styles.fill, { backgroundColor: theme.background }]}>
@@ -96,8 +100,8 @@ export default function TutorScreen() {
       <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         {loadingHistory ? (
           <LoadingState label="Loading conversation…" />
-        ) : session.isError && !pending ? (
-          <ErrorState error={session.error} onRetry={() => void session.refetch()} />
+        ) : (session.isError || sessionOffline) && !pending ? (
+          <ErrorState error={session.error ?? OFFLINE_ERROR} onRetry={() => void session.refetch()} />
         ) : (
           <FlatList
             ref={listRef}
@@ -122,10 +126,16 @@ export default function TutorScreen() {
                     <Pressable
                       key={prompt}
                       accessibilityRole="button"
+                      accessibilityState={{ disabled: !online }}
+                      disabled={!online}
                       onPress={() => submit(prompt)}
                       style={({ pressed }) => [
                         styles.prompt,
-                        { borderColor: theme.border, backgroundColor: theme.surface, opacity: pressed ? 0.7 : 1 },
+                        {
+                          borderColor: theme.border,
+                          backgroundColor: theme.surface,
+                          opacity: !online ? 0.4 : pressed ? 0.7 : 1,
+                        },
                       ]}>
                       <Text variant="label">{prompt}</Text>
                     </Pressable>
@@ -175,16 +185,18 @@ export default function TutorScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Send"
-              accessibilityState={{ disabled: isStreaming || !draft.trim() }}
-              disabled={isStreaming || !draft.trim()}
+              accessibilityState={{ disabled: cannotSend }}
+              disabled={cannotSend}
               onPress={() => submit(draft)}
-              style={[
-                styles.send,
-                { backgroundColor: theme.primary, opacity: isStreaming || !draft.trim() ? 0.4 : 1 },
-              ]}>
+              style={[styles.send, { backgroundColor: theme.primary, opacity: cannotSend ? 0.4 : 1 }]}>
               <Ionicons name="arrow-up" size={20} color={theme.onPrimary} />
             </Pressable>
           </View>
+          {!online ? (
+            <Text variant="caption" color="muted">
+              You&apos;re offline. The AI Tutor needs a connection to answer.
+            </Text>
+          ) : null}
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

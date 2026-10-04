@@ -38,3 +38,42 @@ jest.mock('expo-sqlite/kv-store', () => {
 // and it replaces the global `requestAnimationFrame` with a mock that passes
 // a timestamp to its callbacks.
 jest.mock('react-native-worklets', () => require('react-native-worklets/src/mock'));
+
+// No native network module under Jest: online by default. Tests drive
+// connectivity through TanStack's `onlineManager.setOnline` or `__emit`.
+jest.mock('expo-network', () => {
+  const listeners = new Set();
+  return {
+    __emit: (state) => listeners.forEach((l) => l(state)),
+    getNetworkStateAsync: jest.fn(async () => ({ isConnected: true, isInternetReachable: true })),
+    addNetworkStateListener: jest.fn((listener) => {
+      listeners.add(listener);
+      return { remove: () => listeners.delete(listener) };
+    }),
+  };
+});
+
+// No native notifications module under Jest. Permission granted by default;
+// tests override per case and drive taps through `__respond`.
+jest.mock('expo-notifications', () => {
+  const responseListeners = new Set();
+  return {
+    __respond: (response) => responseListeners.forEach((l) => l(response)),
+    DEFAULT_ACTION_IDENTIFIER: 'expo.modules.notifications.actions.DEFAULT',
+    SchedulableTriggerInputTypes: { DAILY: 'daily' },
+    AndroidImportance: { DEFAULT: 3 },
+    IosAuthorizationStatus: { NOT_DETERMINED: 0, DENIED: 1, AUTHORIZED: 2, PROVISIONAL: 3, EPHEMERAL: 4 },
+    setNotificationHandler: jest.fn(),
+    setNotificationChannelAsync: jest.fn(async () => null),
+    getPermissionsAsync: jest.fn(async () => ({ status: 'granted', granted: true, canAskAgain: true, expires: 'never' })),
+    requestPermissionsAsync: jest.fn(async () => ({ status: 'granted', granted: true, canAskAgain: true, expires: 'never' })),
+    scheduleNotificationAsync: jest.fn(async (request) => request.identifier ?? 'id'),
+    cancelScheduledNotificationAsync: jest.fn(async () => undefined),
+    getLastNotificationResponse: jest.fn(() => null),
+    clearLastNotificationResponse: jest.fn(),
+    addNotificationResponseReceivedListener: jest.fn((listener) => {
+      responseListeners.add(listener);
+      return { remove: () => responseListeners.delete(listener) };
+    }),
+  };
+});

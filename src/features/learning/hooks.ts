@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useMutationState, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 import { getEnv } from '@/lib/env';
@@ -8,21 +8,16 @@ import {
   getProgress,
   listCourses,
   searchLessons,
-  updateLessonProgress,
 } from '@/lib/api/endpoints/learning';
+import { LESSON_COMPLETE_MUTATION_KEY } from '@/lib/query/persist';
 import { usePreferencesStore } from '@/stores/preferences-store';
 import type { CourseDetail, ProgressItem } from '@/types/contracts';
 
-import { isTrackableLessonId, progressMap, searchCourseTitles } from './curriculum';
+import { completeLesson } from './api';
+import { progressMap, searchCourseTitles } from './curriculum';
+import { learningKeys } from './keys';
 
-export const learningKeys = {
-  all: ['learning'] as const,
-  courses: () => [...learningKeys.all, 'courses'] as const,
-  course: (id: string) => [...learningKeys.all, 'course', id] as const,
-  lesson: (id: string) => [...learningKeys.all, 'lesson', id] as const,
-  progress: () => [...learningKeys.all, 'progress'] as const,
-  search: (q: string) => [...learningKeys.all, 'search', q] as const,
-};
+export { learningKeys };
 
 // Authored content changes rarely (CMS publishes revalidate the web cache).
 const CONTENT_STALE_MS = 5 * 60_000;
@@ -77,19 +72,17 @@ export function useActiveCourse() {
 }
 
 /**
- * Mark a lesson complete. Optimistic: the progress cache updates at once,
- * then rolls back if the backend rejects it (offline included). Nothing is
- * reported as saved until the server confirms.
+ * Mark a lesson complete. Optimistic: the progress cache updates at once.
+ * Offline the mutation pauses (not an error), keeps the optimistic row and is
+ * persisted until it can be sent; the UI shows it as pending sync, never as
+ * saved. It rolls back only if the backend rejects it, or the request fails
+ * while we believed we were online.
  */
 export function useMarkLessonComplete() {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (lessonId: string) => {
-      if (!isTrackableLessonId(lessonId)) {
-        throw new Error('Progress tracking is unavailable for this lesson.');
-      }
-      return updateLessonProgress(lessonId, { status: 'completed', completion_pct: 100 });
-    },
+  return useMutation<ProgressItem, Error, string, { previous: ProgressItem[] | undefined }>({
+    mutationKey: LESSON_COMPLETE_MUTATION_KEY,
+    mutationFn: completeLesson,
     onMutate: async (lessonId) => {
       await queryClient.cancelQueries({ queryKey: learningKeys.progress() });
       const previous = queryClient.getQueryData<ProgressItem[]>(learningKeys.progress());
@@ -99,8 +92,12 @@ export function useMarkLessonComplete() {
       ]);
       return { previous };
     },
-    onError: (_err, _lessonId, context) => {
-      queryClient.setQueryData(learningKeys.progress(), context?.previous);
+    onError: (_err, lessonId, context) => {
+      // Undo only this lesson's row: other completions may be queued meanwhile.
+      const before = context?.previous?.find((r) => r.lesson_id === lessonId);
+      queryClient.setQueryData<ProgressItem[]>(learningKeys.progress(), (rows) =>
+        rows ? [...rows.filter((r) => r.lesson_id !== lessonId), ...(before ? [before] : [])] : rows
+      );
     },
     onSuccess: (saved) => {
       queryClient.setQueryData<ProgressItem[]>(learningKeys.progress(), (rows = []) => [
@@ -109,6 +106,31 @@ export function useMarkLessonComplete() {
       ]);
     },
   });
+}
+
+/**
+ * Lessons whose completion is queued offline. The progress cache already
+ * counts them (optimistic), so screens mark them as waiting to sync rather
+ * than saved. Reads the mutation cache, so it also covers completions
+ * restored after a restart.
+ */
+export function usePendingLessonCompletions(): ReadonlySet<string> {
+  const ids = useMutationState({
+    filters: {
+      mutationKey: LESSON_COMPLETE_MUTATION_KEY,
+      status: 'pending',
+      predicate: (m) => m.state.isPaused,
+    },
+    select: (m) => m.state.variables as string,
+  });
+  // `ids` keeps its identity while unchanged (useMutationState shares structure).
+  return useMemo(() => new Set(ids), [ids]);
+}
+
+/** True while a completion of this lesson is queued offline. */
+export function useLessonCompletionPendingSync(lessonId: string | undefined): boolean {
+  const pending = usePendingLessonCompletions();
+  return !!lessonId && pending.has(lessonId);
 }
 
 export const MIN_SEARCH_LENGTH = 2;
