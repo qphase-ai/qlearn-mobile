@@ -6,8 +6,9 @@ import { Banner, Button, Card, ErrorState, LoadingState, Screen, Text } from '@/
 import { MIN_TOUCH, Radii, Spacing } from '@/constants/theme';
 import { signOut } from '@/features/auth/auth-api';
 import { authErrorMessage } from '@/features/auth/errors';
-import { useMe } from '@/features/profile/hooks';
+import { ACCOUNT_OFFLINE, useMe } from '@/features/profile/hooks';
 import { useTheme } from '@/hooks/use-theme';
+import { isWaitingForNetwork } from '@/lib/query/online';
 import { usePreferencesStore, type ThemePreference } from '@/stores/preferences-store';
 
 const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
@@ -36,7 +37,7 @@ export default function ProfileScreen() {
       <Card>
         <Text variant="heading">Account</Text>
         {me.isPending ? (
-          <LoadingState />
+          isWaitingForNetwork(me) ? <Text color="muted">{ACCOUNT_OFFLINE}</Text> : <LoadingState />
         ) : me.isError ? (
           <ErrorState error={me.error} onRetry={() => void me.refetch()} retrying={me.isRefetching} />
         ) : (

@@ -9,16 +9,26 @@ import { ScreenTitle } from '@/components/ScreenTitle';
 import { Banner, Card, EmptyState, ErrorState, LoadingState, ProgressBar, Text, TextField } from '@/components/ui';
 import { MIN_TOUCH, Radii, Spacing } from '@/constants/theme';
 import {
+  completionCaption,
   courseCompletion,
+  courseLessons,
   isModuleLocked,
   levelLabel,
   moduleCompletion,
+  pendingCount,
   sortedModules,
 } from '@/features/learning/curriculum';
-import { MIN_SEARCH_LENGTH, useActiveCourse, useLessonSearch, useProgress } from '@/features/learning/hooks';
+import {
+  MIN_SEARCH_LENGTH,
+  useActiveCourse,
+  useLessonSearch,
+  usePendingLessonCompletions,
+  useProgress,
+} from '@/features/learning/hooks';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useTheme } from '@/hooks/use-theme';
 import { toUserMessage } from '@/lib/api/errors';
+import { isWaitingForNetwork, OFFLINE_ERROR } from '@/lib/query/online';
 import { usePreferencesStore } from '@/stores/preferences-store';
 
 export default function LearnScreen() {
@@ -26,6 +36,7 @@ export default function LearnScreen() {
   const { courses, course, activeId } = useActiveCourse();
   const progressQuery = useProgress();
   const { progress } = progressQuery;
+  const pending = usePendingLessonCompletions();
   const setSelectedCourseId = usePreferencesStore((s) => s.setSelectedCourseId);
 
   const [query, setQuery] = useState('');
@@ -48,17 +59,20 @@ export default function LearnScreen() {
   }
 
   let body: React.ReactNode;
-  if (courses.isPending) body = <LoadingState label="Loading the curriculum…" />;
-  else if (courses.isError) body = <ErrorState error={courses.error} onRetry={() => void courses.refetch()} />;
+  if (courses.isPending && !isWaitingForNetwork(courses)) body = <LoadingState label="Loading the curriculum…" />;
+  else if (courses.isPending || courses.isError)
+    body = <ErrorState error={courses.error ?? OFFLINE_ERROR} onRetry={() => void courses.refetch()} />;
   else if (courses.data.length === 0)
     body = <EmptyState icon="book-outline" title="No courses yet" message="Published courses will appear here." />;
-  else if (course.isPending) body = <LoadingState label="Loading course…" />;
-  else if (course.isError) body = <ErrorState error={course.error} onRetry={() => void course.refetch()} />;
+  else if (course.isPending && !isWaitingForNetwork(course)) body = <LoadingState label="Loading course…" />;
+  else if (course.isPending || course.isError)
+    body = <ErrorState error={course.error ?? OFFLINE_ERROR} onRetry={() => void course.refetch()} />;
   else if (searching) {
-    body = search.isPending ? (
+    const searchOffline = 'fetchStatus' in search && isWaitingForNetwork(search);
+    body = search.isPending && !searchOffline ? (
       <LoadingState label="Searching…" />
-    ) : search.isError ? (
-      <ErrorState error={search.error} onRetry={() => void search.refetch()} />
+    ) : search.isPending || search.isError ? (
+      <ErrorState error={search.error ?? OFFLINE_ERROR} onRetry={() => void search.refetch()} />
     ) : !search.data?.length ? (
       <EmptyState icon="search-outline" title="No matching lessons" message={`Nothing found for “${debounced.trim()}”.`} />
     ) : (
@@ -70,6 +84,7 @@ export default function LearnScreen() {
             subtitle={hit.snippet ?? `${hit.course_title} · ${hit.module_title}`}
             type={hit.lesson_type}
             completed={(progress[hit.lesson_id] ?? 0) >= 100}
+            pendingSync={pending.has(hit.lesson_id)}
             onPress={() => openLesson(hit.lesson_id, hit.course_id)}
           />
         ))}
@@ -83,7 +98,7 @@ export default function LearnScreen() {
           {course.data.description ? <Text color="muted">{course.data.description}</Text> : null}
           <ProgressBar value={completion.total ? completion.done / completion.total : 0} label="Course progress" />
           <Text variant="caption" color="muted">
-            {completion.done} of {completion.total} lessons complete
+            {completionCaption(completion.done, completion.total, pendingCount(courseLessons(course.data), pending))}
           </Text>
         </Card>
         {progressQuery.isError ? (
@@ -101,6 +116,7 @@ export default function LearnScreen() {
                 title={mod.title}
                 done={done}
                 total={total}
+                pending={pendingCount(mod.lessons, pending)}
                 // Lock only once progress is known: a failed or pending progress
                 // load must not trap the student out of later levels.
                 locked={progressQuery.isSuccess && isModuleLocked(modules, i, progress)}

@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { createContext, use, useEffect, useState, type PropsWithChildren } from 'react';
 
 import { apiClient } from '@/lib/api/client';
+import { clearPersistedCache, setPersistOwner } from '@/lib/query/persist';
 import { getSupabase } from '@/lib/supabase/client';
 import { useTutorStore } from '@/stores/tutor-store';
 
@@ -46,15 +47,31 @@ export function AuthProvider({ children }: PropsWithChildren) {
         if (mounted) setState({ session: null, user: null, isLoading: false });
       });
 
+    // Cached server data, queued completions and the on-disk copy belong to
+    // one account. Wipe them whenever the account changes or nobody is signed
+    // in, so they are never shown to (or sent as) someone else.
+    let owner: string | null = null;
+    const wipe = () => {
+      queryClient.clear(); // queries and queued mutations
+      void clearPersistedCache().catch(() => undefined);
+      // The tutor conversation index is per-account too.
+      useTutorStore.setState({ activeSessionId: null, conversations: [], context: null });
+    };
+
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return;
       setState({ session, user: session?.user ?? null, isLoading: false });
-      // Never show one account's cached data to another.
-      if (event === 'SIGNED_OUT') {
-        queryClient.clear();
-        // The tutor conversation index is per-account: drop it with the session.
-        useTutorStore.setState({ activeSessionId: null, conversations: [], context: null });
+      const userId = session?.user.id ?? null;
+      const signedOut = event === 'SIGNED_OUT' || (event === 'INITIAL_SESSION' && !userId);
+      // On launch `owner` is unknown: the persister's restore already checked
+      // the cache against this session.
+      const switched = (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && !!owner && owner !== userId;
+      if (signedOut || switched) {
+        setPersistOwner(null); // saves triggered by the wipe must not be stamped
+        wipe();
       }
+      owner = userId;
+      setPersistOwner(userId);
     });
 
     // A request still unauthorized after a token refresh means the session

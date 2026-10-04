@@ -38,3 +38,17 @@ jest.mock('expo-sqlite/kv-store', () => {
 // and it replaces the global `requestAnimationFrame` with a mock that passes
 // a timestamp to its callbacks.
 jest.mock('react-native-worklets', () => require('react-native-worklets/src/mock'));
+
+// No native network module under Jest: online by default. Tests drive
+// connectivity through TanStack's `onlineManager.setOnline` or `__emit`.
+jest.mock('expo-network', () => {
+  const listeners = new Set();
+  return {
+    __emit: (state) => listeners.forEach((l) => l(state)),
+    getNetworkStateAsync: jest.fn(async () => ({ isConnected: true, isInternetReachable: true })),
+    addNetworkStateListener: jest.fn((listener) => {
+      listeners.add(listener);
+      return { remove: () => listeners.delete(listener) };
+    }),
+  };
+});

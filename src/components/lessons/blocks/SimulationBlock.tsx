@@ -6,6 +6,7 @@ import { Banner, Button, Card, Text } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 import { CircuitRunError, useCircuitRun } from '@/features/circuit/useCircuitRun';
 import { toUserMessage } from '@/lib/api/errors';
+import { useIsOnline } from '@/lib/query/online';
 
 import { AskAboutCircuit } from './AskAboutCircuit';
 import { OpenInBuilder } from './OpenInBuilder';
@@ -17,6 +18,7 @@ import type { BlockProps } from './types';
  */
 export function SimulationBlock({ circuit, shots, view, title, description }: BlockProps<'simulation'>) {
   const { state, run } = useCircuitRun();
+  const online = useIsOnline();
   const running = state.status === 'running';
 
   return (
@@ -33,10 +35,11 @@ export function SimulationBlock({ circuit, shots, view, title, description }: Bl
           label={state.status === 'done' ? 'Run again' : 'Run simulation'}
           variant="secondary"
           loading={running}
+          disabled={!online}
           onPress={() => void run(circuit, shots, title || 'Lesson simulation')}
         />
         <Text variant="caption" color="muted">
-          {shots} shots · runs on the Q-Learn simulator
+          {online ? `${shots} shots · runs on the Q-Learn simulator` : "You're offline. Runs need the Q-Learn simulator."}
         </Text>
       </View>
       {state.status === 'error' ? (

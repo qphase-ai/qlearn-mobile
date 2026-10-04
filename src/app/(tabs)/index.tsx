@@ -10,8 +10,9 @@ import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { displayNameFor } from '@/features/profile/display-name';
 import { learningKeys } from '@/features/learning/hooks';
-import { useMe } from '@/features/profile/hooks';
+import { ACCOUNT_OFFLINE, useMe } from '@/features/profile/hooks';
 import { useTheme } from '@/hooks/use-theme';
+import { isWaitingForNetwork } from '@/lib/query/online';
 
 /**
  * Home answers "what should I do right now?": the next lesson in the
@@ -49,7 +50,11 @@ export default function HomeScreen() {
             <Text variant="heading">Your account</Text>
           </View>
           {me.isPending ? (
-            <LoadingState label="Connecting to Q-Learn…" />
+            isWaitingForNetwork(me) ? (
+              <Text color="muted">{ACCOUNT_OFFLINE}</Text>
+            ) : (
+              <LoadingState label="Connecting to Q-Learn…" />
+            )
           ) : me.isError ? (
             <ErrorState error={me.error} onRetry={() => void me.refetch()} retrying={me.isRefetching} />
           ) : (

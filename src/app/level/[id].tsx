@@ -5,26 +5,30 @@ import { LessonRow } from '@/components/learning/LessonRow';
 import { Card, EmptyState, ErrorState, LoadingState, ProgressBar, Screen, Text } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 import {
+  completionCaption,
   isLessonCompleted,
   lessonNumber,
   levelLabel,
   moduleCompletion,
+  pendingCount,
   sortedLessons,
   sortedModules,
 } from '@/features/learning/curriculum';
-import { useActiveCourse, useCourse, useProgress } from '@/features/learning/hooks';
+import { useActiveCourse, useCourse, usePendingLessonCompletions, useProgress } from '@/features/learning/hooks';
+import { isWaitingForNetwork, OFFLINE_ERROR } from '@/lib/query/online';
 
 export default function LevelScreen() {
   const { id, courseId } = useLocalSearchParams<{ id: string; courseId?: string }>();
   const active = useActiveCourse();
   const course = useCourse(courseId ?? active.activeId);
   const { progress } = useProgress();
+  const pending = usePendingLessonCompletions();
 
-  if (course.isPending) return <LoadingState />;
-  if (course.isError) {
+  if (course.isPending && !isWaitingForNetwork(course)) return <LoadingState />;
+  if (course.isPending || course.isError) {
     return (
       <Screen edges={[]}>
-        <ErrorState error={course.error} onRetry={() => void course.refetch()} />
+        <ErrorState error={course.error ?? OFFLINE_ERROR} onRetry={() => void course.refetch()} />
       </Screen>
     );
   }
@@ -53,7 +57,7 @@ export default function LevelScreen() {
         <Text variant="title">{mod.title}</Text>
         <ProgressBar value={total ? done / total : 0} label="Level progress" />
         <Text variant="caption" color="muted">
-          {done} of {total} lessons complete
+          {completionCaption(done, total, pendingCount(mod.lessons, pending))}
         </Text>
       </Card>
       {lessons.length === 0 ? (
@@ -67,6 +71,7 @@ export default function LevelScreen() {
               title={lesson.title}
               type={lesson.lesson_type}
               completed={isLessonCompleted(progress, lesson.id)}
+              pendingSync={pending.has(lesson.id)}
               onPress={() =>
                 router.push({ pathname: '/lesson/[id]', params: { id: lesson.id, courseId: course.data.id } })
               }

@@ -82,7 +82,15 @@ export function CitationChips({ citations }: { citations: Citation[] }) {
   );
 }
 
-export function ErrorBubble({ message, onRetry }: { message: string; onRetry: () => void }) {
+export function ErrorBubble({
+  message,
+  onRetry,
+  retryDisabled = false,
+}: {
+  message: string;
+  onRetry: () => void;
+  retryDisabled?: boolean;
+}) {
   const theme = useTheme();
   return (
     <View
@@ -91,7 +99,7 @@ export function ErrorBubble({ message, onRetry }: { message: string; onRetry: ()
       <Text variant="label" color="error">
         {message}
       </Text>
-      <Button label="Try again" variant="secondary" onPress={onRetry} />
+      <Button label="Try again" variant="secondary" onPress={onRetry} disabled={retryDisabled} />
     </View>
   );
 }

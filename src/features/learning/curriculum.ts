@@ -71,6 +71,24 @@ export function courseCompletion(course: CourseDetail, progress: ProgressMap): {
   return { done, total };
 }
 
+/** How many of these lessons have a completion still waiting to sync. */
+export function pendingCount(lessons: readonly { id: string }[], pending: ReadonlySet<string>): number {
+  return lessons.filter((l) => pending.has(l.id)).length;
+}
+
+export function courseLessons(course: CourseDetail): { id: string }[] {
+  return course.modules.flatMap((m) => m.lessons);
+}
+
+/**
+ * "3 of 8 lessons complete", flagging completions queued offline: they are
+ * counted (the cache is optimistic) but not yet saved by the server.
+ */
+export function completionCaption(done: number, total: number, pending = 0): string {
+  const base = `${done} of ${total} lessons complete`;
+  return pending > 0 ? `${base} · ${pending} waiting to sync` : base;
+}
+
 export function levelLabel(moduleIndex: number): string {
   return `Level ${moduleIndex + 1}`;
 }

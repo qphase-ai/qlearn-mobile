@@ -34,28 +34,38 @@
 ### Task 1: Offline cache and connectivity
 **Files:** `src/lib/query/{client.ts,persist.ts,online.ts}`, `src/app/_layout.tsx`, `src/features/auth/AuthProvider.tsx`, `src/features/learning/hooks.ts`, `src/components/OfflineBanner.tsx`, lesson screen and the Run / tutor composers, plus tests
 
-- [ ] `online.ts`: `onlineManager.setEventListener` backed by `expo-network` (`addNetworkStateListener`, `getNetworkStateAsync`). Online = `isConnected && isInternetReachable !== false`. Add a `useIsOnline()` hook via `useSyncExternalStore` on `onlineManager`.
-- [ ] `persist.ts`:
+- [x] `online.ts`: `onlineManager.setEventListener` backed by `expo-network` (`addNetworkStateListener`, `getNetworkStateAsync`). Online = `isConnected && isInternetReachable !== false`. Add a `useIsOnline()` hook via `useSyncExternalStore` on `onlineManager`.
+- [x] `persist.ts`:
   - An async persister over `expo-sqlite/kv-store`, key `qlearn.query-cache`.
   - `maxAge` 7 days. `buster` = app version from `expo-constants`.
   - `shouldDehydrateQuery` allows only successful queries whose key root is in the learning allowlist: courses, course detail, lesson, progress. Paused mutations are always dehydrated.
   - Export `clearPersistedCache()`.
-- [ ] `client.ts`:
+- [x] `client.ts`:
   - Default `gcTime` must be at least `maxAge` for persisted queries (24 h is fine; document why).
   - `setMutationDefaults(['lesson-progress','complete'], { mutationFn })` so a mutation restored after a restart can still run.
   - `useMarkLessonComplete` uses that `mutationKey`, keeps its optimistic update, and **does not roll back** while paused offline. On a real server rejection it rolls back as today.
-- [ ] `_layout.tsx`: `PersistQueryClientProvider` replaces `QueryClientProvider`. `onSuccess` calls `queryClient.resumePausedMutations()` and then invalidates progress.
-- [ ] `AuthProvider`: on `SIGNED_OUT`, clear the client, the mutation cache and the persisted cache.
-- [ ] UI:
+- [x] `_layout.tsx`: `PersistQueryClientProvider` replaces `QueryClientProvider`. `onSuccess` calls `queryClient.resumePausedMutations()` and then invalidates progress.
+- [x] `AuthProvider`: on `SIGNED_OUT`, clear the client, the mutation cache and the persisted cache.
+- [x] UI:
   - `OfflineBanner` at the top of the signed-in stack: "You're offline. Showing saved content."
   - The lesson screen shows "Saved on this device · syncs when you're back online" while the completion mutation `isPaused`.
   - RunPanel Run, simulation Run and the tutor Send are disabled offline, with a one-line reason.
   - Uncached screens offline show the existing error state with an offline message, not a spinner forever.
-- [ ] Tests:
+- [x] Tests:
   - Allowlist dehydration.
   - The mutation pauses offline and resumes online, and stays optimistic while paused.
   - Sign-out wipes the persisted key.
   - The banner and disabled states.
+
+**Implementation notes (deviations and decisions):**
+- Online = `isConnected !== false && isInternetReachable !== false`. Both fields are optional in expo-network, so "unknown" counts as online rather than showing a false offline banner at launch. The initial `getNetworkStateAsync()` result is ignored if a change event arrived first.
+- Mutations default to `networkMode: 'always'` (sign-in, sign-out, password reset fail fast offline as before). Only the lesson-completion key (`['lesson-progress','complete']`) uses `'online'` through `setMutationDefaults`, so it is the only thing that pauses.
+- Only paused lesson-completion mutations are persisted, not every paused mutation: other mutations have no registered mutationFn and couldn't run after a restart.
+- The persisted cache is per account: each save carries `ownerId`, nothing is saved while signed out (an empty cache removes the key), and restore discards the cache unless the current Supabase session's user id matches. This runs before hydration, so a queued completion can never resume with another account's token. AuthProvider also wipes the in-memory and on-disk cache on `SIGNED_OUT`, on `INITIAL_SESSION` with no session, and when a different user signs in.
+- Buster = app version | runtimeVersion (when a string) | `CACHE_SCHEMA`.
+- `onSuccess` only calls `resumePausedMutations()` (which returns at once offline; the client's online subscription resumes later). The progress resync is the completion default's `onSettled` invalidation, so it also runs for restored completions, which have no rollback callbacks. A live completion that the server rejects rolls back only its own row.
+- Queued completions are marked "waiting to sync" everywhere progress shows (lesson rows, level/course counts, Continue learning), not only on the lesson screen.
+- Offline with nothing cached, data screens show the offline error. The profile card instead says "Account details load when you're back online."
 
 ### Task 2: Deep links
 **Files:** `src/app/_layout.tsx`, `src/features/linking/{pending-href.ts,…}`, `src/app/+not-found.tsx`, `src/app/(auth)/*` (post-login redirect), plus tests

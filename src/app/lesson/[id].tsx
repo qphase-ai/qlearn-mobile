@@ -12,9 +12,17 @@ import {
   levelLabel,
   locateLesson,
 } from '@/features/learning/curriculum';
-import { useActiveCourse, useCourse, useLesson, useMarkLessonComplete, useProgress } from '@/features/learning/hooks';
+import {
+  useActiveCourse,
+  useCourse,
+  useLesson,
+  useLessonCompletionPendingSync,
+  useMarkLessonComplete,
+  useProgress,
+} from '@/features/learning/hooks';
 import { useTheme } from '@/hooks/use-theme';
 import { toUserMessage } from '@/lib/api/errors';
+import { isWaitingForNetwork, OFFLINE_ERROR } from '@/lib/query/online';
 import { useTutorStore } from '@/stores/tutor-store';
 
 export default function LessonScreen() {
@@ -26,13 +34,19 @@ export default function LessonScreen() {
   const course = useCourse(resolvedCourseId);
   const { progress } = useProgress();
   const markComplete = useMarkLessonComplete();
+  const pendingSync = useLessonCompletionPendingSync(lesson.data?.id);
   const setTutorContext = useTutorStore((s) => s.setContext);
+  const offline = isWaitingForNetwork(lesson);
 
-  if (lesson.isPending) return <LoadingState label="Loading lesson…" />;
-  if (lesson.isError) {
+  if (lesson.isPending && !offline) return <LoadingState label="Loading lesson…" />;
+  if (lesson.isPending || lesson.isError) {
     return (
       <Screen edges={[]}>
-        <ErrorState error={lesson.error} onRetry={() => void lesson.refetch()} retrying={lesson.isRefetching} />
+        <ErrorState
+          error={lesson.error ?? OFFLINE_ERROR}
+          onRetry={() => void lesson.refetch()}
+          retrying={lesson.isRefetching}
+        />
       </Screen>
     );
   }
@@ -87,6 +101,15 @@ export default function LessonScreen() {
           <Text variant="caption" color="muted">
             Progress tracking is unavailable for this lesson.
           </Text>
+        ) : pendingSync ? (
+          // Queued offline: the progress cache already shows it, but the
+          // server hasn't saved it, so never say "Completed" here.
+          <View style={styles.completed} accessibilityLiveRegion="polite">
+            <Ionicons name="time-outline" size={20} color={theme.muted} />
+            <Text variant="label" color="muted" style={styles.shrink}>
+              Saved on this device · syncs when you&apos;re back online
+            </Text>
+          </View>
         ) : completed ? (
           <View style={styles.completed} accessibilityLiveRegion="polite">
             <Ionicons name="checkmark-circle" size={20} color={theme.success} />
@@ -139,6 +162,7 @@ const styles = StyleSheet.create({
   footer: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: Spacing.lg, gap: Spacing.md, marginTop: Spacing.lg },
   completed: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   bold: { fontWeight: '700' },
+  shrink: { flexShrink: 1 },
   nav: { flexDirection: 'row', justifyContent: 'space-between', gap: Spacing.md },
   navButton: { flex: 1 },
 });
