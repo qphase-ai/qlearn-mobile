@@ -13,6 +13,8 @@ import { OfflineBanner } from '@/components/OfflineBanner';
 import { Colors } from '@/constants/theme';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
 import { usePendingHrefReplay } from '@/features/linking/usePendingHrefReplay';
+import { setupNotificationHandler, syncReminderSchedule } from '@/features/notifications/reminders';
+import { useNotificationRouting } from '@/features/notifications/useNotificationRouting';
 import { useColorSchemeName } from '@/hooks/use-theme';
 import { EnvError, getEnv } from '@/lib/env';
 import { createQueryClient } from '@/lib/query/client';
@@ -21,6 +23,7 @@ import { persistOptions } from '@/lib/query/persist';
 
 void SplashScreen.preventAutoHideAsync();
 setupOnlineManager();
+setupNotificationHandler();
 
 function navTheme(scheme: 'light' | 'dark'): Theme {
   const base = scheme === 'dark' ? DarkTheme : DefaultTheme;
@@ -95,6 +98,21 @@ function RootNavigator() {
   const scheme = useColorSchemeName();
   const ready = !isLoading && !isRestoring;
   usePendingHrefReplay(ready, !!session);
+  useNotificationRouting();
+  const signedIn = !!session;
+
+  // The OS schedule follows the reminder preference, on launch and on return
+  // to the foreground (permission revoked in Settings turns it off). Signed
+  // out there is no reminder: sign-out resets it.
+  useEffect(() => {
+    if (!ready || !signedIn) return;
+    const sync = () => void syncReminderSchedule().catch(() => undefined);
+    sync();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') sync();
+    });
+    return () => sub.remove();
+  }, [ready, signedIn]);
 
   // Keep the splash up until the persisted session and the offline cache have
   // been read, so a signed-in student never sees the login screen or a

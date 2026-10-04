@@ -1,7 +1,7 @@
 import Storage from 'expo-sqlite/kv-store';
 import { router } from 'expo-router';
 import { act, cleanup, fireEvent, renderRouter, screen, waitFor } from 'expo-router/testing-library';
-import { Text } from 'react-native';
+import { AppState, Text } from 'react-native';
 
 import AuthLayout from '@/app/(auth)/_layout';
 import LoginScreen from '@/app/(auth)/login';
@@ -14,6 +14,10 @@ import LessonScreen from '@/app/lesson/[id]';
 import LevelScreen from '@/app/level/[id]';
 import ResetPasswordScreen from '@/app/reset-password';
 import type { CourseDetail, LessonDetail } from '@/types/contracts';
+
+import { REMINDER_ID } from '@/features/notifications/reminders';
+import { resetNotificationRoutingForTests } from '@/features/notifications/useNotificationRouting';
+import { DEFAULT_REMINDER, usePreferencesStore } from '@/stores/preferences-store';
 
 import { PENDING_HREF_KEY, PENDING_HREF_TTL_MS, resetPendingHrefForTests } from '../pending-href';
 
@@ -137,8 +141,18 @@ beforeEach(async () => {
   mockContentSource = 'legacy';
   mockListeners.clear();
   resetPendingHrefForTests();
+  resetNotificationRoutingForTests();
+  usePreferencesStore.setState({ reminder: DEFAULT_REMINDER, reminderBlocked: false });
   await Storage.removeItem(PENDING_HREF_KEY);
 });
+
+function tapNotification(url: string) {
+  const notifications = jest.requireMock('expo-notifications');
+  notifications.__respond({
+    actionIdentifier: notifications.DEFAULT_ACTION_IDENTIFIER,
+    notification: { date: Date.now(), request: { identifier: REMINDER_ID, content: { data: { url } }, trigger: null } },
+  });
+}
 
 describe('deep links, signed in', () => {
   beforeEach(() => {
@@ -190,6 +204,61 @@ describe('deep links, signed in', () => {
     await open(url);
     expect(await screen.findByText('Link not supported')).toBeTruthy();
     expect(screen.getByText(/isn't supported in the Q-Learn app yet/)).toBeTruthy();
+  });
+});
+
+describe('study reminder, root layout', () => {
+  it('syncs the reminder schedule on a signed-in launch', async () => {
+    mockSession = session;
+    usePreferencesStore.setState({ reminder: { enabled: true, hour: 18, minute: 30 } });
+    await open('/');
+    await screen.findByText('Home screen');
+    const notifications = jest.requireMock('expo-notifications');
+    await waitFor(() =>
+      expect(notifications.scheduleNotificationAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ identifier: REMINDER_ID, trigger: expect.objectContaining({ hour: 18, minute: 30 }) })
+      )
+    );
+  });
+
+  it('syncs again when the app returns to the foreground', async () => {
+    mockSession = session;
+    const appStateListeners: ((state: string) => void)[] = [];
+    jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, listener) => {
+      appStateListeners.push(listener as (state: string) => void);
+      return { remove: () => undefined } as ReturnType<typeof AppState.addEventListener>;
+    });
+    usePreferencesStore.setState({ reminder: { enabled: true, hour: 18, minute: 30 } });
+    await open('/');
+    await screen.findByText('Home screen');
+    const notifications = jest.requireMock('expo-notifications');
+    await waitFor(() => expect(notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(1));
+
+    // Notifications turned off in Settings while the app was in the background.
+    notifications.getPermissionsAsync.mockResolvedValueOnce({ status: 'denied', granted: false, canAskAgain: false });
+    await act(async () => appStateListeners.forEach((listener) => listener('active')));
+
+    await waitFor(() => expect(usePreferencesStore.getState().reminder.enabled).toBe(false));
+    expect(usePreferencesStore.getState().reminderBlocked).toBe(true);
+    jest.restoreAllMocks();
+  });
+
+  it('routes a tap while running', async () => {
+    mockSession = session;
+    const result = await open('/learn');
+    await screen.findByText('Learn screen');
+    await act(async () => tapNotification('/'));
+    expect(await screen.findByText('Home screen')).toBeTruthy();
+    expect(result.getPathname()).toBe('/');
+  });
+
+  it('keeps a signed-out tap until after sign-in', async () => {
+    const result = await open('/');
+    await screen.findByLabelText('Email');
+    await act(async () => tapNotification(`/lesson/${LESSON}`));
+    await signInWithEmail();
+    expect(await screen.findByText('What is a qubit?')).toBeTruthy();
+    expect(result.getPathname()).toBe(`/lesson/${LESSON}`);
   });
 });
 

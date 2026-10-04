@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { ReminderCard } from '@/components/profile/ReminderCard';
 import { ScreenTitle } from '@/components/ScreenTitle';
 import { Banner, Button, Card, ErrorState, LoadingState, Screen, Text } from '@/components/ui';
 import { MIN_TOUCH, Radii, Spacing } from '@/constants/theme';
@@ -72,6 +73,8 @@ export default function ProfileScreen() {
           })}
         </View>
       </Card>
+
+      <ReminderCard />
 
       {logout.error ? <Banner tone="error" message={authErrorMessage(logout.error)} /> : null}
       <Button

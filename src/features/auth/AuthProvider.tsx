@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { createContext, use, useEffect, useState, type PropsWithChildren } from 'react';
 
 import { clearPendingHref } from '@/features/linking/pending-href';
+import { resetReminder } from '@/features/notifications/reminders';
 import { apiClient } from '@/lib/api/client';
 import { clearPersistedCache, setPersistOwner } from '@/lib/query/persist';
 import { getSupabase } from '@/lib/supabase/client';
@@ -57,6 +58,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
       void clearPersistedCache().catch(() => undefined);
       // The tutor conversation index is per-account too.
       useTutorStore.setState({ activeSessionId: null, conversations: [], context: null });
+      // So is the study reminder: cancel it and reset the preference.
+      void resetReminder().catch(() => undefined);
     };
 
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {

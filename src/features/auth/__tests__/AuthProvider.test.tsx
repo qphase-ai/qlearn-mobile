@@ -23,10 +23,16 @@ jest.mock('@/lib/supabase/client', () => ({
 import { PENDING_HREF_KEY } from '@/features/linking/pending-href';
 
 // eslint-disable-next-line import/first
+import { REMINDER_ID } from '@/features/notifications/reminders';
+
+// eslint-disable-next-line import/first
 import { apiClient } from '@/lib/api/client';
 
 // eslint-disable-next-line import/first
 import { LESSON_COMPLETE_MUTATION_KEY, PERSIST_KEY } from '@/lib/query/persist';
+
+// eslint-disable-next-line import/first
+import { DEFAULT_REMINDER, usePreferencesStore } from '@/stores/preferences-store';
 
 // eslint-disable-next-line import/first
 import { AuthProvider, useAuth } from '../AuthProvider';
@@ -114,6 +120,37 @@ describe('AuthProvider', () => {
     await act(async () => mockAuth.listener?.('SIGNED_IN', session));
     await act(async () => mockAuth.listener?.('SIGNED_OUT', null));
     await waitFor(async () => expect(await kv.getItem(PENDING_HREF_KEY)).toBeNull());
+  });
+
+  it('cancels the study reminder and resets it on sign-out', async () => {
+    const notifications = jest.requireMock('expo-notifications');
+    usePreferencesStore.setState({ reminder: { enabled: true, hour: 7, minute: 30 } });
+    mockAuth.getSession.mockResolvedValue({ data: { session } });
+    await renderProvider();
+    await screen.findByText('signed-in');
+    await act(async () => mockAuth.listener?.('INITIAL_SESSION', session));
+    expect(usePreferencesStore.getState().reminder.enabled).toBe(true);
+
+    await act(async () => mockAuth.listener?.('SIGNED_OUT', null));
+
+    await waitFor(() => expect(usePreferencesStore.getState().reminder).toEqual(DEFAULT_REMINDER));
+    expect(notifications.cancelScheduledNotificationAsync).toHaveBeenCalledWith(REMINDER_ID);
+  });
+
+  it.each([
+    ['INITIAL_SESSION with no session', ['INITIAL_SESSION']],
+    ['SIGNED_OUT at launch (dead refresh token)', ['SIGNED_OUT', 'INITIAL_SESSION']],
+  ])('resets the study reminder on a signed-out launch: %s', async (_case, events) => {
+    const notifications = jest.requireMock('expo-notifications');
+    usePreferencesStore.setState({ reminder: { enabled: true, hour: 7, minute: 30 } });
+    mockAuth.getSession.mockResolvedValue({ data: { session: null } });
+    await renderProvider();
+    await screen.findByText('signed-out');
+
+    for (const event of events) await act(async () => mockAuth.listener?.(event, null));
+
+    expect(notifications.cancelScheduledNotificationAsync).toHaveBeenCalledWith(REMINDER_ID);
+    await waitFor(() => expect(usePreferencesStore.getState().reminder).toEqual(DEFAULT_REMINDER));
   });
 
   describe('per-account cache', () => {

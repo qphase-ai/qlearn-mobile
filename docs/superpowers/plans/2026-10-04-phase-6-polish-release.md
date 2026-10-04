@@ -99,21 +99,39 @@
 ### Task 3: Study reminders (local notifications)
 **Files:** `src/features/notifications/{reminders.ts,useNotificationRouting.ts}`, `src/stores/preferences-store.ts`, `src/app/(tabs)/profile.tsx`, `app.json`, plus tests
 
-- [ ] Preferences: `reminder: { enabled: boolean; hour: number; minute: number }`, default disabled at 19:00. Persisted (it is client state).
-- [ ] `reminders.ts`:
+- [x] Preferences: `reminder: { enabled: boolean; hour: number; minute: number }`, default disabled at 19:00. Persisted (it is client state).
+- [x] `reminders.ts`:
   - `enableReminder(time)`: ask for permission only when the user turns it on (with a rationale first). Create the Android channel `study-reminders`, cancel the previous schedule, and schedule a `DAILY` trigger.
   - `disableReminder()`.
   - `syncReminderSchedule()` on launch, so the OS schedule matches the preference.
   - If permission is denied, keep the toggle off and show how to enable it in Settings (`Linking.openSettings`).
   - Copy is honest and generic ("Time for a little quantum practice"). No streak or progress claims the client can't verify.
-- [ ] Tap routing:
+- [x] Tap routing:
   - The notification `data.url` is `/` (Home → continue learning).
   - Handle both the cold-start last response and runtime responses. Route through Task 2's link handling, so a signed-out tap lands after sign-in.
-- [ ] Profile: a "Study reminder" card with a toggle and a time picker (hour/minute steppers; no new picker dependency).
-- [ ] Sign-out cancels all scheduled reminders and resets the preference.
-- [ ] `app.json`: the `expo-notifications` plugin (icon/color from the theme). No push credentials and no `projectId` dependency for local notifications.
-- [ ] Tests: schedule/cancel calls with `expo-notifications` mocked, permission denied, launch sync, and tap routing.
-- [ ] Audit §13/§14: remote push needs `POST /api/v1/devices` (Expo push token per user) plus server-side sending. This is a smallest-addition proposal and is not built.
+- [x] Profile: a "Study reminder" card with a toggle and a time picker (hour/minute steppers; no new picker dependency).
+- [x] Sign-out cancels all scheduled reminders and resets the preference.
+- [x] `app.json`: the `expo-notifications` plugin (icon/color from the theme). No push credentials and no `projectId` dependency for local notifications.
+- [x] Tests: schedule/cancel calls with `expo-notifications` mocked, permission denied, launch sync, and tap routing.
+- [ ] Audit §13/§14: remote push needs `POST /api/v1/devices` (Expo push token per user) plus server-side sending. This is a smallest-addition proposal and is not built. *(Written in Task 5.)*
+
+**Implementation notes (deviations and decisions):**
+- Only our own request is touched: it is scheduled under the fixed identifier `qlearn.study-reminder` and cancelled with `cancelScheduledNotificationAsync(id)`, never `cancelAll`. Scheduling with the same identifier replaces the request on both platforms, so there is no cancel before scheduling and launch sync can simply reschedule. Every schedule recreates the channel first, in case it was deleted in system Settings. Trigger: `{ type: SchedulableTriggerInputTypes.DAILY, channelId: 'study-reminders', hour, minute }` (`DailyTriggerInput` in expo-notifications 57 `build/Notifications.types.d.ts`).
+- Android: the `study-reminders` channel is created before the permission check, because on Android 13 the OS prompt only appears once a channel exists (SDK 57 docs, Permissions). No `SCHEDULE_EXACT_ALARM`: without it the library falls back to an inexact `setAndAllowWhileIdle` alarm (`ExpoSchedulingDelegate.kt`), which is fine for a reminder. The library manifest adds `RECEIVE_BOOT_COMPLETED` (reschedules after reboot) and `POST_NOTIFICATIONS`. No push token is requested and no `projectId` is read.
+- Permission: `granted`, `ask` (the OS can still prompt) or `blocked`. The card shows a rationale alert before the OS prompt; "Not now" asks nothing. The iOS request asks for alert and sound only (no badge). Blocked or denied keeps the toggle off and shows "Open Settings" (`Linking.openSettings`). That notice is a non-persisted `reminderBlocked` flag in the preferences store, so a sync that finds permission revoked shows it as well. A later sync with permission back clears it. On iOS, `ios.status` provisional/ephemeral counts as allowed (they map to an "undetermined" root status).
+- Sync (`syncReminderSchedule`) runs in `RootNavigator` once the session is read and someone is signed in, and again on every AppState `active`. That catches a permission revoked while the app was in the background (iOS doesn't restart the app). Off: cancel any leftover request. On but permission revoked: cancel, turn the preference off and show the Settings notice.
+- Reminder operations run one at a time through a queue. A foreground sync fires when the OS prompt closes, and it must not read the preference before the pending enable has written it.
+- Hydration: store writes wait for the kv restore, so the restore doesn't overwrite them. zustand's `hasHydrated`/`onFinishHydration` only report a successful restore, so the store also exposes `whenPreferencesLoaded()`. It is settled by the `onRehydrateStorage` callback, which also runs on a failed read or corrupt JSON. The wait is also capped at 2 s.
+- kv content is untrusted: `readReminder()` turns any malformed value (null, a non-object, wrong field types, an out-of-range time) into the default. Sync and the card both read through it.
+- Foreground: the handler returns no banner, no list entry and no sound for the reminder. It fires while the student is already in the app, so it has done its job. Anything else would be shown.
+- Tap routing (`useNotificationRouting`, in `RootNavigator`): `getLastNotificationResponse()` on mount (cold start) plus `addNotificationResponseReceivedListener`. Only the default action is routed. Each response is routed once per process (keyed by request id and date, since the cold-start tap can also reach the listener), and `clearLastNotificationResponse()` runs after routing so a remount or JS reload doesn't route it again. `data.url` goes through `openAppLink`, which validates it, navigates when signed in, and otherwise keeps it for after sign-in. Before the session is read, the auth state is still unknown, so the link is kept and replayed by `usePendingHrefReplay`. `/` itself is never stored, because sign-in lands on Home anyway.
+- Sign-out: `resetReminder()` runs in AuthProvider's per-account wipe. It cancels the OS request at once, before waiting for the store, so a broken kv can't keep a reminder firing after sign-out. Then, queued, it cancels again (in case a pending enable scheduled one) and resets the preference. That covers a real sign-out, the revoked-session path, an account switch, and also a signed-out launch (`SIGNED_OUT` emitted at launch for a dead refresh token, or `INITIAL_SESSION` with no session). Unlike the pending href, there's nothing in a reminder that has to survive the launch. The reminder belongs to the account (Global Constraints). Launch sync only runs signed in, so otherwise a stale reminder would keep firing on a signed-out device and lead to the login screen. An unreadable SecureStore at launch emits no event, so it doesn't reset the reminder.
+- `app.json`: the `expo-notifications` plugin uses `icon` = `assets/images/android-icon-monochrome.png` (the existing monochrome launcher glyph, an alpha silhouette; still the template artwork, so replace it with the store assets in Task 4) and `color` = light `primary` `#0C7792`. The plugin always adds the iOS `aps-environment` entitlement (`withNotificationsIOS.js`), even though local notifications don't use it. It is a Task 4 item.
+- UI: `components/profile/ReminderCard.tsx`, a `Switch` plus hour and minute steppers. Minutes step by 5, and both wrap around. Each stepper is one `adjustable` element for screen readers ("Reminder hour" / "Reminder minutes"), with its value and increment/decrement actions. The −/+ buttons are for touch, and the bare digits are hidden from both platforms. The time shows as 24-hour `HH:MM` (no locale formatting). Controls are disabled while an update is in flight.
+- Known limits, not handled:
+  - The student can lower the importance of the `study-reminders` channel, or turn it off, in Android settings while app-level permission stays granted. The card doesn't detect this (no channel-importance check).
+  - If SecureStore can't be read at launch, AuthProvider never learns the previous owner. A different account signing in then counts as a first sign-in, not a switch, and keeps the previous account's reminder. Storing an owner id with the preference would close this; it is rare and not done.
+  - The hydration wait is capped at 2 s. A kv read that succeeds later could overwrite a reminder change made in that window. The sign-out cancel doesn't depend on it.
 
 ### Task 4: Release readiness and performance
 **Files:** `app.json`, `eas.json`, `docs/release.md`, `.github/workflows/ci.yml` (only if needed), and list screens (performance)
@@ -126,6 +144,7 @@
 - [ ] `app.json`:
   - Review permissions: Android `blockedPermissions` for anything a dependency adds that the app doesn't use (verify with `npx expo config --type introspect`).
   - The iOS privacy manifest reasons required by the SDK. `version` stays as is.
+  - The `expo-notifications` plugin always adds the iOS `aps-environment` entitlement (push), which local reminders don't need. Decide whether to strip it with a small config plugin, or keep it for future remote push (audit §13).
 - [ ] Performance:
   - Any unbounded server list rendered with `ScrollView` + `map` becomes `FlatList` (the curriculum level list, search results, tutor history).
   - No speculative memoisation (React Compiler is on).
