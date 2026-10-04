@@ -161,6 +161,21 @@ export function defaultParams(type: GateType): GateParams | undefined {
   return Object.fromEntries(defs.map((p) => [p.key, p.default])) as GateParams;
 }
 
+export type AngleResult = { ok: true; value: number } | { ok: false; error: 'not-a-number' | 'not-finite' };
+
+/**
+ * A request-supplied angle read the way the backend's `_angle` reads it: a
+ * missing angle is 0, a numeric string is parsed (Python `float()`), and
+ * anything else present must be a finite number.
+ */
+export function parseAngle(raw: unknown): AngleResult {
+  if (raw === undefined) return { ok: true, value: 0 };
+  const value = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN;
+  if (Number.isNaN(value)) return { ok: false, error: 'not-a-number' };
+  if (!Number.isFinite(value)) return { ok: false, error: 'not-finite' };
+  return { ok: true, value };
+}
+
 // Common multiples of π are shown symbolically, exactly as the web does.
 const PI_FRACTIONS: [number, number][] = [
   [1, 1], [1, 2], [1, 3], [1, 4], [1, 6], [1, 8], [2, 3], [3, 4], [3, 2], [2, 1],

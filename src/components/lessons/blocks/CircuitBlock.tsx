@@ -5,6 +5,7 @@ import { Text } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 
 import { AskAboutCircuit } from './AskAboutCircuit';
+import { OpenInBuilder } from './OpenInBuilder';
 import type { BlockProps } from './types';
 
 export function CircuitBlock({ spec, title, description }: BlockProps<'circuit'>) {
@@ -17,6 +18,7 @@ export function CircuitBlock({ spec, title, description }: BlockProps<'circuit'>
           {description}
         </Text>
       ) : null}
+      <OpenInBuilder spec={spec} title={title} />
       <AskAboutCircuit spec={spec} title={title} />
     </View>
   );

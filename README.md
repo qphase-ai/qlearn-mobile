@@ -22,7 +22,9 @@ The backend, database, auth, curriculum, AI tutor and quantum execution all live
 
 - **Phase 4 (AI Tutor)**: streamed answers from the existing Q-Learn tutor (Markdown, math, citations), persistent conversations, and "ask about this lesson / this circuit" entry points. Phase 3 (graded practice) waits on a server-side quiz API.
 
-The circuit builder (Build) is next. See the roadmap in the audit (§18).
+- **Phase 5 (Build)**: a touch-first circuit editor. You can tap to place gates, long-press and drag to move them, edit angles, undo and redo, use example templates, run on the Q-Learn quantum backend, ask the tutor about the circuit, and open lesson circuits in the builder. It sends the same canonical `CircuitSpec` as the web.
+
+Phase 6 (offline, notifications, deep links, release) is next. See the roadmap in the audit (§18).
 
 ## Tech stack
 

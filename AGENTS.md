@@ -45,6 +45,11 @@ Run lint, type-check and tests before declaring any task done.
   Keep non-route code outside `src/app/`.
 - `ios/` and `android/` are generated (CNG). Configure native behaviour in `app.json`.
 - Plans follow the superpowers format in `docs/superpowers/plans/`.
+- Circuit editor: pure domain in `src/features/circuit/editor/` (model ops, `toCircuitSpec`, which
+  must stay a key-for-key port of the web's `nodesToCircuitSpec`, validation, geometry and drag
+  worklets), state in `src/stores/circuit-editor-store.ts`, UI in `src/components/circuit/editor/`.
+  Gesture callbacks run on the UI thread: only worklets and shared values inside them, and reach
+  JS via `scheduleOnRN`.
 - Lesson rendering: `src/components/lessons/LessonRenderer.tsx` holds the closed block registry
   (mirrors `cms/src/blocks/lessonBlocks.ts` and the web's `components/learn/blocks`). Add a
   block type in all three together. Markdown is native; only chunks with math use the DOM
