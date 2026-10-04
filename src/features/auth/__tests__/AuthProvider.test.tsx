@@ -20,6 +20,9 @@ jest.mock('@/lib/supabase/client', () => ({
 }));
 
 // eslint-disable-next-line import/first
+import { PENDING_HREF_KEY } from '@/features/linking/pending-href';
+
+// eslint-disable-next-line import/first
 import { apiClient } from '@/lib/api/client';
 
 // eslint-disable-next-line import/first
@@ -93,6 +96,24 @@ describe('AuthProvider', () => {
 
     expect(queryClient.getMutationCache().getAll()).toHaveLength(0);
     await waitFor(async () => expect(await kv.getItem(PERSIST_KEY)).toBeNull());
+  });
+
+  it('keeps a pending deep link through a signed-out launch, forgets it on sign-out', async () => {
+    const kv = jest.requireMock('expo-sqlite/kv-store').default;
+    const entry = JSON.stringify({ href: '/learn', savedAt: Date.now() });
+    await kv.setItem(PENDING_HREF_KEY, entry);
+    mockAuth.getSession.mockResolvedValue({ data: { session: null } });
+    await renderProvider();
+    await screen.findByText('signed-out');
+
+    // auth-js emits SIGNED_OUT before INITIAL_SESSION when a stored refresh token fails.
+    await act(async () => mockAuth.listener?.('SIGNED_OUT', null));
+    await act(async () => mockAuth.listener?.('INITIAL_SESSION', null));
+    expect(await kv.getItem(PENDING_HREF_KEY)).toBe(entry);
+
+    await act(async () => mockAuth.listener?.('SIGNED_IN', session));
+    await act(async () => mockAuth.listener?.('SIGNED_OUT', null));
+    await waitFor(async () => expect(await kv.getItem(PENDING_HREF_KEY)).toBeNull());
   });
 
   describe('per-account cache', () => {

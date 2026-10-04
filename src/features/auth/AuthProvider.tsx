@@ -2,6 +2,7 @@ import type { Session, User } from '@supabase/supabase-js';
 import { useQueryClient } from '@tanstack/react-query';
 import { createContext, use, useEffect, useState, type PropsWithChildren } from 'react';
 
+import { clearPendingHref } from '@/features/linking/pending-href';
 import { apiClient } from '@/lib/api/client';
 import { clearPersistedCache, setPersistOwner } from '@/lib/query/persist';
 import { getSupabase } from '@/lib/supabase/client';
@@ -70,6 +71,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
         setPersistOwner(null); // saves triggered by the wipe must not be stamped
         wipe();
       }
+      // Only when someone was signed in: auth-js can also emit SIGNED_OUT at
+      // launch (a refresh token that no longer works), and a link opened
+      // before or during that launch must survive it.
+      if (event === 'SIGNED_OUT' && owner) clearPendingHref();
       owner = userId;
       setPersistOwner(userId);
     });

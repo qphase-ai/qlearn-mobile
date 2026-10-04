@@ -2,6 +2,7 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { LessonRow } from '@/components/learning/LessonRow';
+import { LinkNotSupported } from '@/components/LinkNotSupported';
 import { Card, EmptyState, ErrorState, LoadingState, ProgressBar, Screen, Text } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 import {
@@ -15,15 +16,19 @@ import {
   sortedModules,
 } from '@/features/learning/curriculum';
 import { useActiveCourse, useCourse, usePendingLessonCompletions, useProgress } from '@/features/learning/hooks';
+import { isValidContentId } from '@/features/linking/links';
 import { isWaitingForNetwork, OFFLINE_ERROR } from '@/lib/query/online';
 
 export default function LevelScreen() {
   const { id, courseId } = useLocalSearchParams<{ id: string; courseId?: string }>();
+  // Params can come from a deep link: never fetch with a malformed id.
+  const validLink = isValidContentId(id) && (courseId === undefined || isValidContentId(courseId));
   const active = useActiveCourse();
-  const course = useCourse(courseId ?? active.activeId);
+  const course = useCourse(validLink ? (courseId ?? active.activeId) : null);
   const { progress } = useProgress();
   const pending = usePendingLessonCompletions();
 
+  if (!validLink) return <LinkNotSupported />;
   if (course.isPending && !isWaitingForNetwork(course)) return <LoadingState />;
   if (course.isPending || course.isError) {
     return (

@@ -12,6 +12,7 @@ import { ConfigErrorScreen } from '@/components/ConfigErrorScreen';
 import { OfflineBanner } from '@/components/OfflineBanner';
 import { Colors } from '@/constants/theme';
 import { AuthProvider, useAuth } from '@/features/auth/AuthProvider';
+import { usePendingHrefReplay } from '@/features/linking/usePendingHrefReplay';
 import { useColorSchemeName } from '@/hooks/use-theme';
 import { EnvError, getEnv } from '@/lib/env';
 import { createQueryClient } from '@/lib/query/client';
@@ -93,6 +94,7 @@ function RootNavigator() {
   const isRestoring = useIsRestoring();
   const scheme = useColorSchemeName();
   const ready = !isLoading && !isRestoring;
+  usePendingHrefReplay(ready, !!session);
 
   // Keep the splash up until the persisted session and the offline cache have
   // been read, so a signed-in student never sees the login screen or a

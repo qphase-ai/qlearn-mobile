@@ -3,6 +3,7 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { hasLessonContent, LessonRenderer } from '@/components/lessons/LessonRenderer';
+import { LinkNotSupported } from '@/components/LinkNotSupported';
 import { Banner, Button, EmptyState, ErrorState, LoadingState, Screen, Text } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 import {
@@ -20,6 +21,7 @@ import {
   useMarkLessonComplete,
   useProgress,
 } from '@/features/learning/hooks';
+import { isValidContentId, isValidLessonId } from '@/features/linking/links';
 import { useTheme } from '@/hooks/use-theme';
 import { toUserMessage } from '@/lib/api/errors';
 import { isWaitingForNetwork, OFFLINE_ERROR } from '@/lib/query/online';
@@ -28,16 +30,19 @@ import { useTutorStore } from '@/stores/tutor-store';
 export default function LessonScreen() {
   const theme = useTheme();
   const { id, courseId } = useLocalSearchParams<{ id: string; courseId?: string }>();
+  // Params can come from a deep link: never fetch with a malformed id.
+  const validLink = isValidLessonId(id) && (courseId === undefined || isValidContentId(courseId));
   const active = useActiveCourse();
   const resolvedCourseId = courseId ?? active.activeId;
-  const lesson = useLesson(id);
-  const course = useCourse(resolvedCourseId);
+  const lesson = useLesson(validLink ? id : null);
+  const course = useCourse(validLink ? resolvedCourseId : null);
   const { progress } = useProgress();
   const markComplete = useMarkLessonComplete();
   const pendingSync = useLessonCompletionPendingSync(lesson.data?.id);
   const setTutorContext = useTutorStore((s) => s.setContext);
   const offline = isWaitingForNetwork(lesson);
 
+  if (!validLink) return <LinkNotSupported />;
   if (lesson.isPending && !offline) return <LoadingState label="Loading lesson…" />;
   if (lesson.isPending || lesson.isError) {
     return (

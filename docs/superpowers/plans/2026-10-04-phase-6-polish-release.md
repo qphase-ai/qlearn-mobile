@@ -70,21 +70,31 @@
 ### Task 2: Deep links
 **Files:** `src/app/_layout.tsx`, `src/features/linking/{pending-href.ts,…}`, `src/app/+not-found.tsx`, `src/app/(auth)/*` (post-login redirect), plus tests
 
-- [ ] Supported links, each resolving to an existing route:
+- [x] Supported links, each resolving to an existing route:
   - `qlearn://lesson/<id>`, `qlearn://level/<id>`
   - `qlearn://learn`, `qlearn://build`, `qlearn://tutor`, `qlearn://profile`, `qlearn://` (home)
   - The auth links already handled (`auth/callback`, `reset-password`) must keep working.
-- [ ] Pending href:
+- [x] Pending href:
   - When a signed-out user opens a protected link, remember the path (in memory, plus kv so it survives a cold start; one entry, expires after 15 min).
   - After sign-in (email or Google), `router.replace` to it once, then clear it.
   - Never store or replay the auth callback, reset-password or a link with an unknown root. Clear it on sign-out.
   - Use Expo Router's documented hooks (`usePathname` / `+native-intent` `redirectSystemPath` as appropriate for SDK 57). Read the docs before choosing.
-- [ ] IDs: only accept ids matching the backend id shape (UUID or the CMS slug/id pattern the content layer already accepts). Otherwise show not-found. Not-found copy explains the link isn't supported yet.
-- [ ] Not supported (doc only):
+- [x] IDs: only accept ids matching the backend id shape (UUID or the CMS slug/id pattern the content layer already accepts). Otherwise show not-found. Not-found copy explains the link isn't supported yet.
+- [x] Not supported (doc only; the audit §13/§14 rows are written in Task 5):
   - `circuit/<id>`: no `GET /circuits/{id}`.
   - `quiz/<id>`: Phase 3 is blocked.
-  - Universal links (`https://…`): these need the web domain to host the apple-app-site-association and assetlinks.json files from the Q-Learn frontend. Record this in audit §13/§14.
-- [ ] Tests: `expo-router/testing-library` `renderRouter` for each supported link, the signed-out → sign-in → land-on-target flow, the rejection of an invalid id, and pending href expiry.
+  - Universal links (`https://…`): these need the web domain to host the apple-app-site-association and assetlinks.json files from the Q-Learn frontend. Task 5 records this in audit §13/§14.
+- [x] Tests: `expo-router/testing-library` `renderRouter` for each supported link, the signed-out → sign-in → land-on-target flow, the rejection of an invalid id, and pending href expiry.
+
+**Implementation notes (deviations and decisions):**
+- Capture uses `src/app/+native-intent.ts` `redirectSystemPath`, which expo-router 57 calls for every system link, cold (`initial: true`, from `getInitialURL`) and warm (from the `Linking` `url` subscription), before routing (`build/getLinkingConfig.js`, `build/link/linking.js`). It never rewrites the path. `usePathname` was not usable: the docs say a blocked `Stack.Protected` screen redirects to the anchor or first available screen, so the target path is gone by the time a layout reads it (it shows only for one render on a cold start). Native-intent has no auth context (per the docs), so `features/linking/pending-href.ts` keeps the auth state the root navigator reports; a link that arrives before the session is read is held and becomes pending only if the session turns out empty.
+- Replay: `usePendingHrefReplay` in `RootNavigator` calls `router.replace` once, after the render that flips the guards, for email, Google and restored sessions alike. `(auth)/*` is unchanged.
+- Validation (`features/linking/links.ts`) depends on the content source. Legacy: lesson, level and course ids are UUIDs. CMS: lessons are UUIDs (content_refs) or `payload:<doc id>`, and levels and courses are Payload doc ids (`[A-Za-z0-9-]{1,64}`, the web's `/api/cms` check). The lesson and level screens validate their params (including `courseId`) and show "Link not supported" without fetching. `+not-found` uses the same copy.
+- Home (`/`) is never stored, either as the pending href or as a launch link. A plain launch arrives as the root URL, so storing it would replace a waiting link. Kv contents are re-validated on read, and an entry dated in the future counts as expired.
+- The pending href is cleared only on a `SIGNED_OUT` that follows a signed-in user (which covers the revoked-session path), not by the whole AuthProvider wipe. The wipe also runs on a signed-out launch (`INITIAL_SESSION` with no user). auth-js also emits `SIGNED_OUT` during init, before `INITIAL_SESSION`, when a stored refresh token fails. Clearing in either case would drop a link that has to survive the launch.
+- `openAppLink(href)` is there for Task 3. It accepts only links that pass the same allow-list. Signed in, it navigates at once. Otherwise it stores the link for after sign-in.
+- Also fixed: signed out, `auth/callback` used to redirect to the protected `/` and stay blank. Now it goes `back()` when it sits on top of a screen, which is the Android OAuth case. A `replace` there would stack a second `(auth)` route (seen in the router state). Opened cold, it replaces to `/login` (signed out) or `/` (signed in), and the guard moves on once the session lands.
+- Tests run the real root layout, guards and screens through `renderRouter` (tab screens are stubbed). With RNTL v14, `renderRouter` returns a thenable, so await it and keep the original object for `getPathname`.
 
 ### Task 3: Study reminders (local notifications)
 **Files:** `src/features/notifications/{reminders.ts,useNotificationRouting.ts}`, `src/stores/preferences-store.ts`, `src/app/(tabs)/profile.tsx`, `app.json`, plus tests
