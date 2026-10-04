@@ -136,26 +136,38 @@
 ### Task 4: Release readiness and performance
 **Files:** `app.json`, `eas.json`, `docs/release.md`, `.github/workflows/ci.yml` (only if needed), and list screens (performance)
 
-- [ ] `expo-updates`:
+- [x] `expo-updates`:
   - Configure the plugin with `runtimeVersion: { policy: 'fingerprint' }` and channels from `eas.json` (preview / production).
   - Check for an update on launch with the default `ON_LOAD` behaviour.
   - The Profile "About" row shows the version, the channel and the update id.
-- [ ] `eas.json`: keep the profiles. Add a `submit.production` skeleton without any credentials (ASC app id and service account key are placeholders documented in `docs/release.md`).
-- [ ] `app.json`:
+- [x] `eas.json`: keep the profiles. Add a `submit.production` skeleton without any credentials (ASC app id and service account key are placeholders documented in `docs/release.md`).
+- [x] `app.json`:
   - Review permissions: Android `blockedPermissions` for anything a dependency adds that the app doesn't use (verify with `npx expo config --type introspect`).
   - The iOS privacy manifest reasons required by the SDK. `version` stays as is.
   - The `expo-notifications` plugin always adds the iOS `aps-environment` entitlement (push), which local reminders don't need. Decide whether to strip it with a small config plugin, or keep it for future remote push (audit §13).
-- [ ] Performance:
+- [x] Performance:
   - Any unbounded server list rendered with `ScrollView` + `map` becomes `FlatList` (the curriculum level list, search results, tutor history).
   - No speculative memoisation (React Compiler is on).
-- [ ] `docs/release.md`: a checklist covering:
+- [x] `docs/release.md`: a checklist covering:
   - Confirming the bundle id.
   - Supabase redirect URLs.
   - EAS env vars per environment.
   - Build, submit and OTA commands.
   - Store listing assets.
   - Rollback (`eas update:republish`).
-- [ ] Verify `npx expo config` resolves, and that export bundles.
+- [x] Verify `npx expo config` resolves, and that export bundles.
+
+**Implementation notes (deviations and decisions):**
+- `expo-updates` 57.0.24 (`EXPO_OFFLINE=1 npx expo install`). `app.json` sets `runtimeVersion: { policy: 'fingerprint' }` (valid in SDK 57 docs; `@expo/config-plugins` writes the `file:fingerprint` sentinel and the hash is computed at build/update time, so an OTA reaches only builds with the same native fingerprint; `eas.json`, `.gitignore`, icons and config plugins are fingerprint inputs too) and `updates.checkAutomatically: 'ON_LOAD'`, `fallbackToCacheTimeout: 0` (the defaults, made explicit). The channels come from the existing `eas.json` profiles.
+- No `updates.url` or `extra.eas.projectId`: the repo has no EAS project and none was invented. Without a URL the plugin writes `EXUpdatesEnabled=false` / `expo.modules.updates.ENABLED=false` (introspect), so builds run their embedded bundle and nothing throws. `eas init` and `eas update:configure` are release-checklist steps (`docs/release.md`). In Expo Go and dev builds `Updates.isEnabled` is false and `channel`/`updateId` are null.
+- Profile → About: version (`Constants.expoConfig.version`), channel and short update id, via the pure `features/profile/build-info.ts` (`describeBuild`, tested). Dev shows "Development" / "Development build", a build with updates off "None" / "Embedded (updates off)", an embedded launch "Embedded · <id>". Read once per process, because a downloaded update applies only on the next launch.
+- Cache buster: with the fingerprint policy `Constants.expoConfig.runtimeVersion` is the `{ policy }` object, so `persist.ts` now uses `Updates.runtimeVersion` (the resolved native value) and falls back to a string config value.
+- `eas.json` `submit.production`: `ios.ascAppId: "REPLACE_WITH_ASC_APP_ID"` and Android `track: internal`, `releaseStatus: draft`. No key path: the Play service-account key is uploaded to EAS with `eas credentials`.
+- iOS `aps-environment`: stripped by `plugins/withoutPushEntitlement.js`. A plain `withEntitlementsPlist` listed after `expo-notifications` would not work: `withMod` runs its callback before the next (earlier-registered) mod, so later plugins run first. The plugin uses `withBaseMod` and deletes the key after `nextMod`, so it works in any position (checked both orders). Introspect: entitlements `{}`. How to remove it for remote push is in `docs/release.md`.
+- Android `blockedPermissions`: `SYSTEM_ALERT_WINDOW`, `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE` (template manifest, plus expo-file-system and expo-image/Glide library manifests; the app shows only remote and bundled images). Kept: `INTERNET`, `ACCESS_NETWORK_STATE` (expo-network, expo-updates, expo-image), `ACCESS_WIFI_STATE` (expo-network), `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED` (expo-notifications), `VIBRATE`.
+- iOS privacy manifest: `ios.privacyManifests` lists the union of the reasons in the installed pods' `PrivacyInfo.xcprivacy` files and React Native core (UserDefaults CA92.1; FileTimestamp C617.1, 0A2A.1, 3B52.1; SystemBootTime 35F9.1; DiskSpace E174.1, 85F4.1), with the source of each in `docs/release.md`. RN's `pod install` aggregation would add the same; listing them makes it explicit. Nothing added without a source (expo-sqlite and expo-secure-store ship no manifest).
+- Performance: the Learn tab (levels and search results), the level lesson list and tutor history are `FlatList`s. Learn uses one list for both modes with the title, course chips, search field and course card in `ListHeaderComponent`, so the search field keeps focus and nothing nests a VirtualizedList in a ScrollView. Rows read progress and pending state from outside `data`, so they pass them as `extraData` (with the React Compiler memoising `data`, rows would otherwise go stale). `listContentStyle` (exported from `Screen`) keeps the screen frame without the `gap`. Tutor history is local and capped at 30, converted anyway as the plan lists it. No memoisation added.
+- CI unchanged: it already bundles iOS and Android with placeholder env.
 
 ### Task 5: Docs and verification
 - [ ] Audit: §13, §14, §16, §18 and §19 updated with Phase 6 status and the remaining backend gaps (push devices, `GET /circuits/{id}`, quiz API, universal-link files on the web).

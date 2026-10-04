@@ -1,8 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { EmptyState, Screen, Text } from '@/components/ui';
+import { EmptyState, listContentStyle, Screen, Text } from '@/components/ui';
 import { MIN_TOUCH, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useTutorStore } from '@/stores/tutor-store';
@@ -28,13 +29,21 @@ export default function TutorHistoryScreen() {
   }
 
   return (
-    <Screen edges={['bottom']}>
-      <Text variant="caption" color="muted">
-        Conversations started on this device.
-      </Text>
-      <View>
-        {conversations.map((c) => (
-          <View key={c.id} style={[styles.row, { borderBottomColor: theme.border }]}>
+    <SafeAreaView edges={['bottom']} style={[styles.fill, { backgroundColor: theme.background }]}>
+      <FlatList
+        contentContainerStyle={listContentStyle}
+        data={conversations}
+        keyExtractor={(c) => c.id}
+        // Rows read this outside `data`: re-render them when it changes.
+        extraData={activeSessionId}
+        ListHeaderComponentStyle={styles.header}
+        ListHeaderComponent={
+          <Text variant="caption" color="muted">
+            Conversations started on this device.
+          </Text>
+        }
+        renderItem={({ item: c }) => (
+          <View style={[styles.row, { borderBottomColor: theme.border }]}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Open conversation: ${c.title}`}
@@ -60,13 +69,15 @@ export default function TutorHistoryScreen() {
               <Ionicons name="trash-outline" size={18} color={theme.muted} />
             </Pressable>
           </View>
-        ))}
-      </View>
-    </Screen>
+        )}
+      />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  fill: { flex: 1 },
+  header: { marginBottom: Spacing.lg },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -7,6 +7,7 @@ import { Banner, Button, Card, ErrorState, LoadingState, Screen, Text } from '@/
 import { MIN_TOUCH, Radii, Spacing } from '@/constants/theme';
 import { signOut } from '@/features/auth/auth-api';
 import { authErrorMessage } from '@/features/auth/errors';
+import { getBuildInfo } from '@/features/profile/build-info';
 import { ACCOUNT_OFFLINE, useMe } from '@/features/profile/hooks';
 import { useTheme } from '@/hooks/use-theme';
 import { isWaitingForNetwork } from '@/lib/query/online';
@@ -23,6 +24,9 @@ const ROLE_LABEL: Record<string, string> = {
   instructor: 'Instructor',
   admin: 'Admin',
 };
+
+// Fixed for the life of the process: a downloaded update applies on the next launch.
+const BUILD = getBuildInfo();
 
 export default function ProfileScreen() {
   const theme = useTheme();
@@ -75,6 +79,15 @@ export default function ProfileScreen() {
       </Card>
 
       <ReminderCard />
+
+      <Card>
+        <Text variant="heading">About</Text>
+        <View style={styles.rows}>
+          <Row label="Version" value={BUILD.version} />
+          <Row label="Channel" value={BUILD.channel} />
+          <Row label="Update" value={BUILD.update} />
+        </View>
+      </Card>
 
       {logout.error ? <Banner tone="error" message={authErrorMessage(logout.error)} /> : null}
       <Button

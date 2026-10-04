@@ -3,6 +3,7 @@ import { hashKey, type Mutation, type Query } from '@tanstack/react-query';
 import type { PersistQueryClientOptions, PersistedClient, Persister } from '@tanstack/react-query-persist-client';
 import Constants from 'expo-constants';
 import Storage from 'expo-sqlite/kv-store';
+import * as Updates from 'expo-updates';
 
 import { getSupabase } from '@/lib/supabase/client';
 
@@ -102,7 +103,9 @@ export const queryPersister: Persister = {
   removeClient: () => basePersister.removeClient(),
 };
 
-const runtimeVersion = Constants.expoConfig?.runtimeVersion;
+// The fingerprint policy is resolved at build time, so only the native module
+// knows the value. It reports '' while expo-updates is disabled.
+const runtimeVersion = Updates.runtimeVersion || '';
 
 export const persistOptions: Omit<PersistQueryClientOptions, 'queryClient'> = {
   persister: queryPersister,
@@ -111,7 +114,7 @@ export const persistOptions: Omit<PersistQueryClientOptions, 'queryClient'> = {
   // shapes: start from an empty cache.
   buster: [
     Constants.expoConfig?.version ?? 'dev',
-    typeof runtimeVersion === 'string' ? runtimeVersion : '',
+    runtimeVersion,
     CACHE_SCHEMA,
   ].join('|'),
   dehydrateOptions: {
